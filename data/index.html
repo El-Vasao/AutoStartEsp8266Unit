@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>El Line</title>
+    <!-- CSP -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+    <style>
+      [x-cloak] { display: none !important; }
+      /* Header toast area (does not affect layout) */
+      .site-header { position: relative; }
+      .header-toast {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+      }
+      .header-toast-card {
+        pointer-events: none;
+        max-width: 520px;
+        width: min(520px, calc(100% - 24px));
+        background: rgba(17, 26, 46, 0.96);
+        color: #e6edf3;
+        border: 1px solid rgba(34, 48, 85, 0.85);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+        border-radius: 14px;
+        padding: 12px 14px;
+        transform: translateY(-6px);
+        opacity: 0;
+        transition: transform 0.18s ease, opacity 0.18s ease;
+        text-align: center;
+        line-height: 1.35;
+      }
+      .header-toast-card.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
+      .header-toast-card.warning {
+        border-color: rgba(251, 191, 36, 0.55);
+      }
+    </style>
+    <!-- INJECT_APP_CSS -->
+    <!-- INJECT_APP_JS -->
+</head>
+<body>
+    <!--
+      UI structure (high level):
+      - busy modal (flash commit / blocking ops)
+      - confirm dialog modal
+      - app container:
+        - header (title + mode badge + toast)
+        - main tabs (panel/programs/settings/system)
+        - tab content:
+          - panel: sensors/inputs/relays/triggers/features/info
+          - programs: list + editor
+          - settings: sub-tabs rendered mostly from UI_SCHEMA via uiForm.fieldRow
+          - system: info + actions + OTA + logs
+    -->
+    <!-- Блокирующая модалка (без закрытия/скипа): запись во flash и т.п. -->
+    <div
+        x-data
+        x-show="$store.uiBusy.open"
+        x-cloak
+        class="modal-backdrop z-60"
+        x-trap.inert.noscroll.noautofocus="$store.uiBusy.open"
+        role="dialog"
+        aria-modal="true"
+    >
+        <div class="modal-card modal-card--sm" tabindex="0">
+            <h3 class="modal-title" x-text="$store.uiBusy.title"></h3>
+            <p class="modal-message" x-text="$store.uiBusy.message"></p>
+            <div class="modal-actions">
+                <button class="btn" type="button" x-show="!$store.uiBusy.okMode" disabled aria-disabled="true">
+                    Подождите… <span x-html="$store.uiFormat.spinnerSvg"></span>
+                </button>
+                <button class="btn primary" type="button" x-show="$store.uiBusy.okMode" @click="$store.uiBusy.ok()">
+                    <span x-text="$store.uiBusy.okLabel || 'OK'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальные подтверждения (перезагрузка, удаление и т.д.) -->
+    <div
+        x-data
+        x-show="$store.uiDialog.open"
+        x-cloak
+        class="modal-backdrop"
+        x-trap.inert.noscroll.noautofocus="$store.uiDialog.open"
+        role="dialog"
+        aria-modal="true"
+    >
+        <div class="modal-card" @click.stop tabindex="0">
+            <h3 class="modal-title" x-text="$store.uiDialog.title"></h3>
+            <p class="modal-message" x-text="$store.uiDialog.message"></p>
+            <div class="modal-actions">
+                <button class="btn" type="button" @click="$store.uiDialog.cancel()" x-text="$store.uiDialog.cancelLabel || 'Отмена'"></button>
+                <button class="btn warning" type="button" @click="$store.uiDialog.extra()" x-show="$store.uiDialog.extraLabel" x-text="$store.uiDialog.extraLabel"></button>
+                <button class="btn danger" type="button" @click="$store.uiDialog.confirm()" x-text="$store.uiDialog.confirmLabel || 'Подтвердить'"></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" x-data="app" x-cloak :class="{ 'ui-locked': $store.uiState.locked, 'unsaved-hint': $store.uiState.unsavedHint }">
+        <div class="init-backdrop" x-show="$store.uiState.locked" x-cloak aria-live="polite" aria-busy="true">
+            <div class="init-card">
+                <div class="init-title">Загрузка…</div>
+                <div class="init-sub">Подгружаем настройки и константы</div>
+            </div>
+        </div>
+        <div class="init-backdrop" x-show="!$store.uiState.locked && $store.uiState.initFailed" x-cloak aria-live="polite" aria-busy="false">
+            <div class="init-card">
+                <div class="init-title">Аварийный режим</div>
+                <div class="init-sub" x-text="$store.uiState.initError || 'Не удалось загрузить данные для UI.'"></div>
+                <div class="modal-actions" style="margin-top:10px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                    <button class="btn warning" type="button" @click="$store.deviceMaintenance.performReboot()">Перезагрузить устройство</button>
+                    <button class="btn" type="button" @click="$store.uiState.activeTab = 'system'">Прошивка / OTA</button>
+                    <button class="btn" type="button" @click="location.reload()">Обновить страницу</button>
+                </div>
+            </div>
+        </div>
+        <header class="site-header">
+            <div class="header-row">
+                <h1>El Line</h1>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+                    <div class="status-badge"
+                         :class="$store.deviceStatus.modeBadge.class"
+                         x-text="$store.deviceStatus.modeBadge.text"></div>
+                    <div class="status-badge"
+                         :class="$store.deviceStatus.gsmBadge.class"
+                         x-text="$store.deviceStatus.gsmBadge.text"></div>
+                </div>
+            </div>
+
+            <!-- Статус-бар/баннеры/тосты убраны по требованию (моб. UX). -->
+        </header>
+
+        <nav class="tab-bar">
+            <button class="tab-button" :class="{ active: activeTab === 'panel' }" @click="switchTab('panel')" :disabled="$store.deviceOta.started || $store.uiState.initFailed">Панель</button>
+            <button class="tab-button" :class="{ active: activeTab === 'programs', unsaved: $store.uiState.unsavedHint && $store.deviceRuntime.programEditorDirty && $store.programs.current }" @click="switchTab('programs')" :disabled="$store.deviceOta.started || $store.uiState.initFailed">Программы</button>
+            <button class="tab-button" :class="{ active: activeTab === 'settings', unsaved: $store.uiState.unsavedHint && $store.settings.dirty }" @click="switchTab('settings')" :disabled="$store.deviceOta.started || $store.uiState.initFailed">Настройки</button>
+            <button class="tab-button" :class="{ active: activeTab === 'system' }" @click="switchTab('system')" :disabled="$store.deviceOta.started">Система</button>
+        </nav>
+
+        <main x-cloak>
+            <!-- Панель управления -->
+            <div x-show="activeTab === 'panel'" id="tab-panel" class="tab-pane active">
+                <div class="panel-grid">
+                    <!-- Датчики -->
+                    <div class="card">
+                        <h3>Датчики</h3>
+                        <template x-if="$store.deviceStatus.loaded">
+                            <div class="tile-grid">
+                                <template x-for="(s, index) in $store.deviceStatus.tempSensors" :key="index">
+                                    <div
+                                        class="tile"
+                                        :class="$store.uiFormat.tempClass(s?.t ?? 0)"
+                                        x-show="!!s && s.valid"
+                                        data-gesture="sensor"
+                                        :data-index="index"
+                                    >
+                                        <div class="tile-name" x-text="$store.uiFormat.sensorName(index)"></div>
+                                        <div class="tile-sub" x-text="(s && s.valid && typeof s.t === 'number') ? s.t.toFixed(1) + '°C' : ''"></div>
+                                    </div>
+                                </template>
+                                <div class="tile empty" x-show="!$store.deviceStatus.hasValidTemps">Нет данных</div>
+                            </div>
+                        </template>
+                        <template x-if="!$store.deviceStatus.loaded">
+                            <div class="loading-placeholder">Загрузка данных...</div>
+                        </template>
+                    </div>
+
+                    <!-- Входы -->
+                    <div class="card">
+                        <h3>Входы</h3>
+                        <template x-if="$store.deviceStatus.loaded">
+                            <div class="tile-grid">
+                                <template x-for="(input, index) in $store.deviceStatus.inputs" :key="index">
+                                    <div
+                                        class="tile"
+                                        :class="$store.uiFormat.inputClass(index, input)"
+                                        :data-index="index"
+                                        data-gesture="input"
+                                    >
+                                        <div class="tile-name" x-text="$store.uiFormat.inputName(index)"></div>
+                                        <div class="tile-sub" x-show="$store.uiFormat.isCounter(index)" x-text="$store.uiFormat.getFrequency(index) + ' rpm'"></div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="!$store.deviceStatus.loaded">
+                            <div class="loading-placeholder">Загрузка данных...</div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Реле -->
+                <div class="card">
+                    <h3>Реле</h3>
+                    <template x-if="$store.deviceStatus.loaded">
+                        <div class="tile-grid">
+                            <template x-for="(state, index) in $store.deviceStatus.relays" :key="index">
+                                <div class="tile relay-tile" :class="state ? 'relay-on' : 'relay-off'">
+                                    <div class="tile-name" x-text="'K' + (index+1)"></div>
+                                    <div class="tile-sub" x-text="state ? 'ON' : 'OFF'"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                    <template x-if="!$store.deviceStatus.loaded">
+                        <div class="loading-placeholder">Загрузка данных...</div>
+                    </template>
+                </div>
+
+                <!-- Триггеры на входах -->
+                <div class="card" x-show="$store.deviceStatus.loaded && $store.settings.input_triggers?.length">
+                    <h3>Триггеры на входах</h3>
+                    <div class="tile-grid">
+                        <template x-for="(trigger, index) in $store.settings.input_triggers" :key="index">
+                            <div
+                                class="tile"
+                                :class="$store.deviceRuntime.inputTriggerEnabled(index) ? 'trigger-on' : 'trigger-off'"
+                                :data-index="index"
+                                data-gesture="inputTrigger"
+                            >
+                                <div class="tile-name" x-text="($store.uiFormat.inputLabelById(trigger.input_id) || ('IN#' + (Number(trigger.input_id) || 0))) + ' → #' + trigger.program_id"></div>
+                                <div class="tile-sub" x-text="trigger.trigger_level ? 'HIGH' : 'LOW'"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Температурные триггеры -->
+                <div class="card" x-show="$store.deviceStatus.loaded && $store.settings.temperature_triggers?.length">
+                    <h3>Температурные триггеры</h3>
+                    <div class="tile-grid">
+                        <template x-for="(trigger, index) in $store.settings.temperature_triggers" :key="index">
+                            <div
+                                class="tile"
+                                :class="$store.deviceRuntime.tempTriggerEnabled(index) ? 'trigger-on' : 'trigger-off'"
+                                :data-index="index"
+                                data-gesture="tempTrigger"
+                            >
+                                <div class="tile-name" x-text="$store.uiFormat.sensorLabelById(trigger.sensor_id) + ' → #' + trigger.program_id"></div>
+                                <div class="tile-sub" x-text="trigger.comparison + ' ' + (trigger.threshold || 0) + '°C'"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Функции (Battery Saver и Термостат) -->
+                <div class="card">
+                    <h3>Функции</h3>
+                    <template x-if="$store.deviceStatus.loaded">
+                        <div class="tile-grid-wide">
+                            <!-- Battery Saver -->
+                            <div
+                                class="tile tile-wide"
+                                :class="$store.deviceRuntime.batterySaverEnabled ? 'feature-on' : 'feature-off'"
+                                data-gesture="batterySaver"
+                            >
+                                <div class="tile-name">🔋 Battery Saver</div>
+                                <div class="tile-sub">
+                                    <span x-text="'Запуск при ' + $store.settings.battery_saver.voltage_start_threshold + ' В'"></span>
+                                    <span x-show="$store.deviceStatus.voltage" x-text="' | Текущее: ' + $store.uiFormat.formatVoltage($store.deviceStatus.voltage)"></span>
+                                </div>
+                                <div class="tile-sub" x-text="'Попыток: ' + ($store.deviceRuntime.batterySaverAttemptsToday || 0) + ' / ' + $store.settings.battery_saver.max_attempts_per_day"></div>
+                            </div>
+                            <!-- Термостат -->
+                            <div
+                                class="tile tile-wide"
+                                :class="$store.deviceRuntime.thermostatEnabled ? 'feature-on' : 'feature-off'"
+                                data-gesture="thermostat"
+                            >
+                                <div class="tile-name">🌡️ Термостат</div>
+                                <div class="tile-sub">
+                                    <span x-text="$store.uiFormat.sensorLabelById($store.settings.thermostat.sensor_id)"></span>
+                                    <span x-text="' | ' + ($store.settings.thermostat.comparison === 'above' ? 'выше' : 'ниже') + ' ' + $store.settings.thermostat.lower_threshold + '°C'"></span>
+                                </div>
+                                <div class="tile-sub" x-text="'Программы: ↓' + ($store.settings.thermostat.program_id_lower || '—') + ' ↑' + ($store.settings.thermostat.program_id_upper || '—')"></div>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!$store.deviceStatus.loaded">
+                        <div class="loading-placeholder">Загрузка данных...</div>
+                    </template>
+                </div>
+
+                <!-- Общая информация (объединённая карточка) -->
+                <div class="card">
+                    <h3>Общая информация</h3>
+                    <template x-if="$store.deviceStatus.loaded">
+                        <div>
+                            <div class="info-row">
+                                <span class="info-label">Двигатель:</span>
+                                <span class="info-value" x-text="$store.deviceStatus.engineRunning ? 'Работает' : 'Заглушен'"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Таймер:</span>
+                                <span class="info-value" x-text="$store.uiFormat.formatTimer($store.deviceStatus.timerRemaining)"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Текущая программа:</span>
+                                <span class="info-value" x-text="$store.deviceStatus.currentProgramName || '—'"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Напряжение:</span>
+                                <span class="info-value" x-text="$store.uiFormat.formatVoltage($store.deviceStatus.voltage)"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Аптайм:</span>
+                                <span class="info-value" x-text="$store.uiFormat.formatUptime($store.deviceStatus.uptime)"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Последняя программа:</span>
+                                <span class="info-value" x-text="$store.deviceStatus.lastProgramName || '—'"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!$store.deviceStatus.loaded">
+                        <div class="loading-placeholder">Загрузка данных...</div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Программы (с редактором) -->
+            <div x-show="activeTab === 'programs'" id="tab-programs" class="tab-pane">
+                <template x-if="$store.programs.loaded">
+                    <div>
+                        <!-- Кнопка новой программы -->
+                        <template x-if="!$store.programs.current">
+                            <div class="card">
+                                <div class="button-group justify-end">
+                                    <button class="btn primary" type="button" @click="$store.programs.newProgram()" :disabled="$store.deviceOta.started">➕ Новая программа</button>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Если список не загрузился, не блокируем UI -->
+                        <template x-if="!$store.programs.loadOk && !$store.programs.current">
+                            <div class="card">
+                                <div>Список программ недоступен (возможно, UI/ассеты не установлены). Создание новой программы доступно.</div>
+                            </div>
+                        </template>
+
+                        <!-- Список программ -->
+                        <template x-if="!$store.programs.current">
+                            <div>
+                                <template x-if="$store.programs.loading">
+                                    <div class="card">Загрузка...</div>
+                                </template>
+                                <template x-if="!$store.programs.loading && $store.programs.items.length === 0">
+                                    <div class="card">Нет созданных программ</div>
+                                </template>
+                                <div class="programs-grid" x-show="!$store.programs.loading && $store.programs.items.length > 0">
+                                    <template x-for="p in $store.programs.items" :key="p.id">
+                                        <div class="program-card">
+                                            <div class="program-card-header">
+                                                <span x-text="'#' + p.id + ' – ' + p.name"></span>
+                                            </div>
+                                            <div class="program-card-actions">
+                                                <button class="btn" type="button" @click="$store.programs.run(p.id)" :disabled="$store.deviceOta.started">Выполнить</button>
+                                                <button class="btn" type="button" @click="$store.programs.edit(p.id)" :disabled="$store.deviceOta.started">Редактировать</button>
+                                                <button class="btn danger" type="button" @click="$store.programs.delete(p.id)" :disabled="$store.deviceOta.started">Удалить</button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Редактор программ (улучшенный) -->
+                        <template x-if="$store.programs.current">
+                            <div class="card program-editor" x-data="programEditor" x-init="initEditor()">
+                                <h3 x-text="$store.programs.editingMode === 'new' ? 'Создание программы' : 'Редактирование программы'"></h3>
+                                <form @submit.prevent="save()" @input="markDirty()" @change="markDirty()">
+                                    <div class="form-group">
+                                        <div class="form-group" x-data="APP.ui.withFieldShell($store.programForm.fieldRow(form, { type: 'number', valueType: 'int', label: 'ID программы', helpTitle: 'Идентификатор', help: 'ID программы (1..255). Должен быть уникальным.' }, 'id', { errors, errorKey: 'id', onChange: () => { markDirty(); validateDebounced(); } }))">
+                                            <label class="form-label" x-text="field.label"></label>
+                                            <div class="control-row">
+                                                <div class="control-main">
+                                                    <input type="text" inputmode="numeric" class="form-control" :class="inputClass()" :value="displayValue()" @input="onNumberInput">
+                                                </div>
+                                                <button type="button" class="help-btn" :class="helpBtnClass()" x-ref="btn" @click="toggleHelp()" @keydown.escape.prevent.stop="closeHelpSafe()" @keydown="onHelpKeydown" aria-label="Справка">?</button>
+                                            </div>
+                                            <div class="help-inline-wrap" x-show="shouldShowHelp()" x-collapse x-transition.opacity.duration.120ms @click.outside="closeHelpSafe()" x-cloak>
+                                                <div class="help-popover">
+                                                    <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                    <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                    <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                    <p x-text="field.help"></p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <div class="form-group" x-data="APP.ui.withFieldShell($store.programForm.fieldRow(form, { type: 'text', valueType: 'string', label: 'Название', helpTitle: 'Ограничение', help: 'Название программы (1..31 символ). Длинное имя будет подсвечено как ошибка.' }, 'name', { errors, errorKey: 'name', onChange: () => { markDirty(); validateDebounced(); } }))">
+                                            <label class="form-label" x-text="field.label"></label>
+                                            <div class="control-row">
+                                                <div class="control-main">
+                                                    <input type="text" class="form-control" :class="inputClass()" :value="displayValue()" @input="onTextInput">
+                                                </div>
+                                                <button type="button" class="help-btn" :class="helpBtnClass()" x-ref="btn" @click="toggleHelp()" @keydown.escape.prevent.stop="closeHelpSafe()" @keydown="onHelpKeydown" aria-label="Справка">?</button>
+                                            </div>
+                                            <div class="help-inline-wrap" x-show="shouldShowHelp()" x-collapse x-transition.opacity.duration.120ms @click.outside="closeHelpSafe()" x-cloak>
+                                                <div class="help-popover">
+                                                    <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                    <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                    <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                    <p x-text="field.help"></p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <h4>Шаги</h4>
+                                    <div id="stepsContainer">
+                                        <template x-for="(step, index) in form.steps" :key="index">
+                                            <div class="step-card" :class="stepCardClass(index)">
+                                                <div class="step-action-row">
+                                                    <div class="step-action-title" x-text="(step.category ? (step.category + ': ') : '') + (step.actionDef?.label || step.action)"></div>
+                                                </div>
+                                                <div class="step-params">
+                                                    <!-- Универсальный рендер параметров шага по schema (`programStepsUiSchema.params`) -->
+                                                    <template x-for="paramKey in (step.actionDef?.params || [])" :key="paramKey">
+                                                        <template x-if="!paramUiField(paramKey)?.hidden">
+                                                            <div class="step-param-group" x-data="APP.ui.withFieldShell($store.programForm.fieldRow(step, paramUiField(paramKey), paramUiPath(paramKey), paramUiOpts(step, index, paramKey)))">
+                                                                <span class="step-param-label" x-text="field.label || paramKey"></span>
+                                                                <div class="control-row" :style="field.type === 'toggle' ? 'align-items: center;' : ''">
+                                                                    <div class="control-main">
+                                                                        <template x-if="field.type === 'select'">
+                                                                            <select class="form-control" :class="(inputClass() || stepFieldTone(index, paramUiToneKey(paramKey)))" :value="value" @change="onSelectChange($event); validateDebounced()">
+                                                                                <template x-for="opt in options()" :key="String(opt.value)">
+                                                                                    <option :value="opt.value" :selected="String(opt.value) === String(value)" x-text="opt.label"></option>
+                                                                                </template>
+                                                                            </select>
+                                                                        </template>
+                                                                        <template x-if="field.type === 'number'">
+                                                                            <input type="text" :inputmode="(field.valueType === 'int') ? 'numeric' : 'decimal'" class="form-control" :class="(inputClass() || stepFieldTone(index, paramUiToneKey(paramKey)))" :value="displayValue()" @input="onNumberInput($event); validateDebounced()">
+                                                                        </template>
+                                                                        <template x-if="field.type === 'text'">
+                                                                            <input type="text" class="form-control" :class="(inputClass() || stepFieldTone(index, paramUiToneKey(paramKey)))" :value="displayValue()" @input="onTextInput($event); validateDebounced()">
+                                                                        </template>
+                                                                    </div>
+                                                                    <button type="button" class="help-btn" :class="helpBtnClass()" x-ref="btn" @click="toggleHelp()" @keydown.escape.prevent.stop="closeHelpSafe()" @keydown="onHelpKeydown" aria-label="Справка">?</button>
+                                                                </div>
+                                                                <div class="help-inline-wrap" x-show="shouldShowHelp()" x-collapse x-transition.opacity.duration.120ms @click.outside="closeHelpSafe()" x-cloak>
+                                                                    <div class="help-popover">
+                                                                        <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                                        <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                                        <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                                        <p x-text="field.help || ''"></p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                    </template>
+                                                </div>
+                                                <div class="step-controls step-controls-bottom">
+                                                    <button class="btn step-up" type="button" @click="moveStep(index, -1)" aria-label="Шаг вверх" x-show="index > 0">↑</button>
+                                                    <button class="btn step-down" type="button" @click="moveStep(index, 1)" aria-label="Шаг вниз" x-show="index < (form.steps.length - 1)">↓</button>
+                                                    <button class="btn danger step-remove" type="button" @click="removeStep(index)" aria-label="Удалить шаг">✕</button>
+                                                </div>
+                                                <span class="step-number" x-text="index+1"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Компактное добавление шага: выпадающий список всех действий -->
+                                    <div class="form-group mt-16">
+                                        <label class="form-label">Добавить шаг</label>
+                                        <div class="row-flex gap-8 align-end">
+                                            <select id="actionSelect" class="form-control w-100" x-model="selectedActionValue" @change="addStepFromSelect()">
+                                                <option value="">-- Выберите действие --</option>
+                                                <template x-for="cat in $store.programStepsUiSchema.actionCategories" :key="cat.name">
+                                                    <optgroup :label="cat.name">
+                                                        <template x-for="act in cat.actions" :key="act.value">
+                                                            <option :value="act.value" x-text="act.label"></option>
+                                                        </template>
+                                                    </optgroup>
+                                                </template>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="button-group mt-20">
+                                        <button class="btn primary" type="submit" :disabled="saving">
+                                            <span x-show="!saving">Сохранить</span>
+                                            <span x-show="saving">Сохранение... <span x-html="$store.uiFormat.spinnerSvg"></span></span>
+                                        </button>
+                                        <button class="btn" type="button" @click="$store.programs.cancelEdit()" :disabled="$store.deviceOta.started">Отмена</button>
+                                        <button class="btn danger" type="button" @click="deleteProgram()" x-show="$store.programs.current.id" :disabled="$store.deviceOta.started">Удалить</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+                <template x-if="!$store.programs.loaded">
+                    <div class="card">Загрузка программ...</div>
+                </template>
+            </div>
+
+            <!-- Настройки (с подтабами) -->
+            <div x-show="activeTab === 'settings'" id="tab-settings" class="tab-pane">
+                <nav class="subtab-bar">
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'wifi', invalid: $store.settingsForm.subtabHasErrors('wifi'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('wifi') && !$store.settingsForm.subtabHasErrors('wifi') }" @click="$store.uiState.activeSubTab = 'wifi'" :disabled="$store.deviceOta.started">Wi-Fi</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'gsm', invalid: $store.settingsForm.subtabHasErrors('gsm'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('gsm') && !$store.settingsForm.subtabHasErrors('gsm') }" @click="$store.uiState.activeSubTab = 'gsm'" :disabled="$store.deviceOta.started">GSM</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'mqtt', invalid: $store.settingsForm.subtabHasErrors('mqtt'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('mqtt') && !$store.settingsForm.subtabHasErrors('mqtt') }" @click="$store.uiState.activeSubTab = 'mqtt'" :disabled="$store.deviceOta.started">MQTT</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'vehicle', invalid: $store.settingsForm.subtabHasErrors('vehicle'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('vehicle') && !$store.settingsForm.subtabHasErrors('vehicle') }" @click="$store.uiState.activeSubTab = 'vehicle'" :disabled="$store.deviceOta.started">Автомобиль</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'sensors', invalid: $store.settingsForm.subtabHasErrors('sensors'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('sensors') && !$store.settingsForm.subtabHasErrors('sensors') }" @click="$store.uiState.activeSubTab = 'sensors'" :disabled="$store.deviceOta.started">Датчики</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'inputs', invalid: $store.settingsForm.subtabHasErrors('inputs'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('inputs') && !$store.settingsForm.subtabHasErrors('inputs') }" @click="$store.uiState.activeSubTab = 'inputs'" :disabled="$store.deviceOta.started">Входы</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'triggers', invalid: $store.settingsForm.subtabHasErrors('triggers'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('triggers') && !$store.settingsForm.subtabHasErrors('triggers') }" @click="$store.uiState.activeSubTab = 'triggers'" :disabled="$store.deviceOta.started">Триггеры</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'thermostat', invalid: $store.settingsForm.subtabHasErrors('thermostat'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('thermostat') && !$store.settingsForm.subtabHasErrors('thermostat') }" @click="$store.uiState.activeSubTab = 'thermostat'" :disabled="$store.deviceOta.started">Термостат</button>
+                    <button class="settings-subtab-button" :class="{ active: $store.uiState.activeSubTab === 'battery', invalid: $store.settingsForm.subtabHasErrors('battery'), unsaved: $store.uiState.unsavedHint && $store.settings.subtabHasChanges('battery') && !$store.settingsForm.subtabHasErrors('battery') }" @click="$store.uiState.activeSubTab = 'battery'" :disabled="$store.deviceOta.started">Battery Saver</button>
+                </nav>
+
+                <template x-if="$store.settings.loaded">
+                    <div>
+                        <!-- Универсальный рендерер "простых" табов по schema.fields -->
+                        <template x-for="tabKey in ['wifi','gsm','mqtt','vehicle','thermostat','battery']" :key="tabKey">
+                            <div x-show="$store.uiState.activeSubTab === tabKey" :class="{ active: $store.uiState.activeSubTab === tabKey }" class="settings-subtab-pane">
+                                <div class="card" :id="tabKey === 'thermostat' ? 'settings-thermostat' : (tabKey === 'battery' ? 'settings-battery' : null)">
+                                    <template x-for="field in ($store.settingsUiSchema.settings?.[tabKey]?.fields || [])" :key="field.path">
+                                        <div class="form-group" x-data="$store.settingsForm.fieldRow(field, field.path)" x-show="(!field.hidden) && (!field.showIf || field.showIf($store))">
+                                            <label class="form-label" x-text="field.label"></label>
+
+                                            <div class="control-row" :style="field.type === 'toggle' ? 'align-items: center;' : ''">
+                                                <div class="control-main">
+                                                    <template x-if="field.type === 'text'">
+                                                        <input
+                                                            type="text"
+                                                            class="form-control"
+                                                            :placeholder="field.placeholder || ''"
+                                                            :inputmode="field.inputmode || null"
+                                                            :autocomplete="field.autocomplete || null"
+                                                            :value="(value ?? '')"
+                                                            :class="inputClass()"
+                                                            @input="onTextInput"
+                                                        >
+                                                    </template>
+
+                                                    <template x-if="field.type === 'number'">
+                                                        <input
+                                                                type="text"
+                                                                :inputmode="(field.valueType === 'int') ? 'numeric' : 'decimal'"
+                                                            class="form-control"
+                                                            :step="field.step || '1'"
+                                                            :min="field.min"
+                                                            :max="field.max"
+                                                            :value="APP.utils.numberToPlainString(value)"
+                                                            :class="inputClass()"
+                                                            @input="onNumberInput"
+                                                        >
+                                                    </template>
+
+                                                    <template x-if="field.type === 'select'">
+                                                        <select
+                                                            class="form-control"
+                                                            :class="inputClass()"
+                                                            :value="value"
+                                                            @change="onSelectChange"
+                                                        >
+                                                            <template x-for="opt in options()" :key="String(opt.value)">
+                                                                <option :value="opt.value" :selected="String(opt.value) === String(value)" x-text="opt.label"></option>
+                                                            </template>
+                                                        </select>
+                                                    </template>
+
+                                                    <template x-if="field.type === 'toggle'">
+                                                        <label class="toggle-row">
+                                                            <button
+                                                                type="button"
+                                                                class="toggle-switch"
+                                                                role="switch"
+                                                                :aria-checked="value"
+                                                                :class="switchClass()"
+                                                                :disabled="$store.deviceOta.started"
+                                                                @click="onToggleClick"
+                                                            ></button>
+                                                            <span x-text="toggleText()"></span>
+                                                        </label>
+                                                    </template>
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    class="help-btn"
+                                                    :class="helpBtnClass()"
+                                                    x-ref="btn"
+                                                    @click="openHelp = !openHelp"
+                                                    @keydown.escape.prevent.stop="openHelp = false"
+                                                    @keydown="onHelpKeydown"
+                                                    aria-label="Справка"
+                                                >?</button>
+                                            </div>
+                                            <div class="help-inline-wrap" x-show="openHelp && (field.help || hasError())" x-collapse x-transition.opacity.duration.120ms @click.outside="openHelp = false" x-cloak>
+                                                <div class="help-popover">
+                                                    <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                    <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+               <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+               <p x-text="field.help"></p>
+                                                </div>
+                                            </div>
+                                            <p class="error-text m-0" x-show="$store.settings.isSchemaInvalid()" x-text="'Валидация недоступна: ' + ($store.settingsValidator?._lastInitError || 'ошибка загрузки схемы')"></p>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Датчики -->
+                        <div x-show="$store.uiState.activeSubTab === 'sensors'" :class="{ active: $store.uiState.activeSubTab === 'sensors' }" class="settings-subtab-pane">
+                            <div class="card">
+                                <template x-for="i in (($store.deviceStatus.tempSensors?.length || 0))" :key="i">
+                                    <div class="sensor-config-item" :id="'settings-sensor-' + (i-1)">
+                                        <h4 x-text="'Датчик ' + i"></h4>
+                                        <template x-for="field in ($store.settingsUiSchema.settings?.sensors?.fields || [])" :key="field.key">
+                                            <div class="form-group" x-data="$store.settingsForm.fieldRow(field, String(field.pathTmpl).replace('{i}', String(i-1)))" x-show="!field.hidden">
+                                                <label class="form-label" x-text="field.label"></label>
+                                                <div class="control-row">
+                                                    <div class="control-main">
+                                                        <template x-if="field.type === 'select'">
+                                                            <select
+                                                                class="form-control"
+                                                                :class="inputClass()"
+                                                                :value="value"
+                                                                @change="onSelectChange"
+                                                            >
+                                                                <template x-for="opt in options()" :key="String(opt.value)">
+                                                                    <option :value="opt.value" :selected="String(opt.value) === String(value)" x-text="opt.label"></option>
+                                                                </template>
+                                                            </select>
+                                                        </template>
+                                                        <template x-if="field.type === 'text'">
+                                                            <input
+                                                                type="text"
+                                                                class="form-control"
+                                                                :inputmode="field.inputmode || null"
+                                                                :autocomplete="field.autocomplete || null"
+                                                                :class="inputClass()"
+                                                                :value="(value ?? '')"
+                                                                @input="onTextInput"
+                                                            >
+                                                        </template>
+                                                        <template x-if="field.type === 'number'">
+                                                            <input
+                                                                type="text"
+                                                                inputmode="decimal"
+                                                                class="form-control"
+                                                                :step="field.step || '1'"
+                                                                :class="inputClass()"
+                                                                :value="APP.utils.numberToPlainString(value)"
+                                                                @input="onNumberInput"
+                                                            >
+                                                        </template>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        class="help-btn"
+                                                        :class="helpBtnClass()"
+                                                        x-ref="btn"
+                                                        @click="openHelp = !openHelp"
+                                                        @keydown.escape.prevent.stop="openHelp = false"
+                                                        @keydown="onHelpKeydown"
+                                                        aria-label="Справка"
+                                                    >?</button>
+                                                </div>
+                                                <div class="help-inline-wrap" x-show="openHelp && (field.help || hasError())" x-collapse x-transition.opacity.duration.120ms @click.outside="openHelp = false" x-cloak>
+                                                    <div class="help-popover">
+                                                        <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                        <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                        <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                        <p x-text="field.help || ('Поле: ' + (field.label || '') + (path ? (' (' + path + ')') : ''))"></p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Входы -->
+                        <div x-show="$store.uiState.activeSubTab === 'inputs'" :class="{ active: $store.uiState.activeSubTab === 'inputs' }" class="settings-subtab-pane">
+                            <div class="card">
+                                <template x-for="i in (($store.deviceStatus.inputs?.length || 0))" :key="i">
+                                    <div class="input-config-item" :id="'settings-input-' + (i-1)">
+                                        <h4 x-text="$store.uiFormat.inputName(i-1)"></h4>
+                                        <template x-for="field in ($store.settingsUiSchema.settings?.inputs?.fields || [])" :key="field.pathTmpl + ':' + field.bind">
+                                            <div class="form-group" x-data="$store.settingsForm.fieldRow(field, String(field.pathTmpl).replace('{i}', String(i-1)))" x-show="(!field.hidden) && (!field.showIf || field.showIf($store, i-1))">
+                                                <label class="form-label" x-text="field.label"></label>
+                                                <div class="control-row" :style="field.type === 'toggle' ? 'align-items: center;' : ''">
+                                                    <div class="control-main">
+                                                        <template x-if="field.type === 'toggle'">
+                                                            <label class="toggle-row">
+                                                                <button
+                                                                    type="button"
+                                                                    class="toggle-switch"
+                                                                    role="switch"
+                                                                    :aria-checked="value"
+                                                                    :class="switchClass()"
+                                                                    :disabled="$store.deviceOta.started"
+                                                                    @click="onToggleClick"
+                                                                ></button>
+                                                                <span x-text="toggleText()"></span>
+                                                            </label>
+                                                        </template>
+
+                                                        <template x-if="field.type === 'text'">
+                                                            <input
+                                                                type="text"
+                                                                class="form-control"
+                                                                :inputmode="field.inputmode || null"
+                                                                :autocomplete="field.autocomplete || null"
+                                                                :value="(value ?? '')"
+                                                                :class="inputClass()"
+                                                                @input="onTextInput"
+                                                            >
+                                                        </template>
+
+                                                        <template x-if="field.type === 'number'">
+                                                            <input
+                                                                type="text"
+                                                                :inputmode="(field.valueType === 'int') ? 'numeric' : 'decimal'"
+                                                                class="form-control"
+                                                                :min="field.min"
+                                                                :max="field.max"
+                                                                :step="field.step || '1'"
+                                                                :value="APP.utils.numberToPlainString(value)"
+                                                                :class="inputClass()"
+                                                                @input="onNumberInput"
+                                                            >
+                                                        </template>
+
+                                                        <template x-if="field.type === 'select'">
+                                                            <select
+                                                                class="form-control"
+                                                                :class="inputClass()"
+                                                                :value="value"
+                                                                @change="onSelectChange"
+                                                            >
+                                                                <template x-for="opt in options()" :key="String(opt.value)">
+                                                                    <option :value="opt.value" x-text="opt.label"></option>
+                                                                </template>
+                                                            </select>
+                                                        </template>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        class="help-btn"
+                                                        :class="helpBtnClass()"
+                                                        x-ref="btn"
+                                                        @click="openHelp = !openHelp"
+                                                        @keydown.escape.prevent.stop="openHelp = false"
+                                                        @keydown="onHelpKeydown"
+                                                        aria-label="Справка"
+                                                    >?</button>
+                                                </div>
+                                                <div class="help-inline-wrap" x-show="openHelp && (field.help || hasError())" x-collapse x-transition.opacity.duration.120ms @click.outside="openHelp = false" x-cloak>
+                                                    <div class="help-popover">
+                                                        <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                        <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                        <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                        <p x-text="field.help || ('Поле: ' + (field.label || '') + (path ? (' (' + path + ')') : ''))"></p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Триггеры -->
+                        <div x-show="$store.uiState.activeSubTab === 'triggers'" :class="{ active: $store.uiState.activeSubTab === 'triggers' }" class="settings-subtab-pane">
+                            <div class="card">
+                                <div id="settings-triggers-config">
+                                    <template x-for="(trigger, idx) in $store.settings.input_triggers" :key="idx">
+                                        <div class="trigger-item" :id="'settings-in-trigger-' + idx" :class="{ 'trigger-card-new': $store.settings.triggerRowIsNew('in', idx) }">
+                                            <div class="trigger-header">
+                                                <h4 x-text="'Триггер ' + (idx+1)"></h4>
+                                                <button class="btn danger trigger-delete" type="button" @click="$store.settings.removeInputTrigger(idx)">✕</button>
+                                            </div>
+                                            <template x-for="field in ($store.settingsUiSchema.settings?.triggers?.inputFields || [])" :key="field.bind">
+                                                <div class="form-group" x-data="$store.settingsForm.fieldRow(field, 'input_triggers.' + String(idx) + '.' + String(field.bind))" x-show="!field.hidden">
+                                                    <label class="form-label" x-text="field.label"></label>
+                                                    <div class="control-row" :style="field.type === 'toggle' ? 'align-items: center;' : ''">
+                                                        <div class="control-main">
+                                                            <template x-if="field.type === 'toggle'">
+                                                                <label class="toggle-row">
+                                                                    <button
+                                                                        type="button"
+                                                                        class="toggle-switch"
+                                                                        role="switch"
+                                                                        :aria-checked="value"
+                                                                        :class="{ on: value, 'field-changed': $store.settings.triggerFieldTone('in', idx, field.bind) === 'field-changed' }"
+                                                                        :disabled="$store.deviceOta.started"
+                                                                        @click="onToggleClick"
+                                                                    ></button>
+                                                                    <span x-text="toggleText()"></span>
+                                                                </label>
+                                                            </template>
+
+                                                            <template x-if="field.type === 'select'">
+                                                                <select
+                                                                    class="form-control"
+                                                                    :class="$store.settings.triggerFieldTone('in', idx, field.bind)"
+                                                                    :value="value"
+                                                                    @change="onSelectChange"
+                                                                >
+                                                                    <template x-for="opt in options()" :key="String(opt.value)">
+                                                                        <option :value="opt.value" x-text="opt.label"></option>
+                                                                    </template>
+                                                                </select>
+                                                            </template>
+                                                        </div>
+
+                                                        <button
+                                                            type="button"
+                                                            class="help-btn"
+                                                            :class="helpBtnClass()"
+                                                            x-ref="btn"
+                                                            @click="openHelp = !openHelp"
+                                                            @keydown.escape.prevent.stop="openHelp = false"
+                                                            @keydown="onHelpKeydown"
+                                                            aria-label="Справка"
+                                                        >?</button>
+                                                    </div>
+                                                    <div class="help-inline-wrap" x-show="openHelp && (field.help || hasError())" x-collapse x-transition.opacity.duration.120ms @click.outside="openHelp = false" x-cloak>
+                                                        <div class="help-popover">
+                                                            <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                            <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                            <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                            <p x-text="field.help || ('Поле: ' + (field.label || '') + (path ? (' (' + path + ')') : ''))"></p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="button-group mt-16"><button class="btn" type="button" @click="$store.settings.addInputTrigger()">➕ Добавить триггер</button></div>
+                            </div>
+                            <div class="card">
+                                <div id="settings-temp-triggers-config">
+                                    <template x-for="(trigger, idx) in $store.settings.temperature_triggers" :key="idx">
+                                        <div class="temp-trigger-item" :id="'settings-temp-trigger-' + idx" :class="{ 'trigger-card-new': $store.settings.triggerRowIsNew('temp', idx) }">
+                                            <div class="trigger-header">
+                                                <h4 x-text="'Температурный триггер ' + (idx+1)"></h4>
+                                                <button class="btn danger trigger-delete" type="button" @click="$store.settings.removeTempTrigger(idx)">✕</button>
+                                            </div>
+                                            <template x-for="field in ($store.settingsUiSchema.settings?.triggers?.tempFields || [])" :key="field.bind">
+                                                <div class="form-group" x-data="$store.settingsForm.fieldRow(field, 'temperature_triggers.' + String(idx) + '.' + String(field.bind))" x-show="!field.hidden">
+                                                    <label class="form-label" x-text="field.label"></label>
+                                                    <div class="control-row" :style="field.type === 'toggle' ? 'align-items: center;' : ''">
+                                                        <div class="control-main">
+                                                            <template x-if="field.type === 'toggle'">
+                                                                <label class="toggle-row">
+                                                                    <button
+                                                                        type="button"
+                                                                        class="toggle-switch"
+                                                                        role="switch"
+                                                                        :aria-checked="value"
+                                                                        :class="{ on: value, 'field-changed': $store.settings.triggerFieldTone('temp', idx, field.bind) === 'field-changed' }"
+                                                                        :disabled="$store.deviceOta.started"
+                                                                        @click="onToggleClick"
+                                                                    ></button>
+                                                                    <span x-text="toggleText()"></span>
+                                                                </label>
+                                                            </template>
+
+                                                            <template x-if="field.type === 'number'">
+                                                                <input type="text" :inputmode="(field.valueType === 'int') ? 'numeric' : 'decimal'" class="form-control"
+                                                                       :step="field.step || '1'"
+                                                                       :class="$store.settings.triggerFieldTone('temp', idx, field.bind)"
+                                                                       :value="APP.utils.numberToPlainString(value)"
+                                                                       @input="onNumberInput">
+                                                            </template>
+
+                                                            <template x-if="field.type === 'select'">
+                                                                <select
+                                                                    class="form-control"
+                                                                    :class="$store.settings.triggerFieldTone('temp', idx, field.bind)"
+                                                                    :value="value"
+                                                                    @change="onSelectChange"
+                                                                >
+                                                                    <template x-for="opt in options()" :key="String(opt.value)">
+                                                                        <option :value="opt.value" x-text="opt.label"></option>
+                                                                    </template>
+                                                                </select>
+                                                            </template>
+                                                        </div>
+
+                                                        <button
+                                                            type="button"
+                                                            class="help-btn"
+                                                            :class="helpBtnClass()"
+                                                            x-ref="btn"
+                                                            @click="openHelp = !openHelp"
+                                                            @keydown.escape.prevent.stop="openHelp = false"
+                                                            @keydown="onHelpKeydown"
+                                                            aria-label="Справка"
+                                                        >?</button>
+                                                    </div>
+                                                    <div class="help-inline-wrap" x-show="openHelp && (field.help || hasError())" x-collapse x-transition.opacity.duration.120ms @click.outside="openHelp = false" x-cloak>
+                                                        <div class="help-popover">
+                                                            <div class="help-popover-title help-popover-title-error" x-show="hasError()">Ошибка</div>
+                                                            <p class="help-popover-text-error" x-show="hasError()" x-text="errorText()"></p>
+                                                            <div class="help-popover-title" x-text="field.helpTitle || 'Справка'"></div>
+                                                            <p x-text="field.help || ('Поле: ' + (field.label || '') + (path ? (' (' + path + ')') : ''))"></p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="button-group mt-16"><button class="btn" type="button" @click="$store.settings.addTempTrigger()">➕ Добавить температурный триггер</button></div>
+                            </div>
+                        </div>
+
+                        <!-- Откат / сохранение всех настроек -->
+                        <div class="button-group mt-20">
+                            <button class="btn primary" type="button" @click="$store.settings.save()" :disabled="$store.settings.loading || $store.deviceOta.started">
+                                <span x-show="!$store.settings.loading">Сохранить все настройки</span>
+                                <span x-show="$store.settings.loading">
+                                    Сохранение... <span x-html="$store.uiFormat.spinnerSvg"></span>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="button-group mt-10" x-show="$store.settings.dirty">
+                            <button
+                                class="btn warning w-100"
+                                type="button"
+                                @click="$store.settings.revertAll()"
+                                :disabled="$store.settings.loading || $store.deviceOta.started"
+                            >
+                                Откатить изменения
+                            </button>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="!$store.settings.loaded">
+                    <div class="card">Загрузка настроек...</div>
+                </template>
+            </div>
+
+            <!-- Система -->
+            <div x-show="activeTab === 'system'" id="tab-system" class="tab-pane">
+                <template x-if="$store.deviceStatus.loaded">
+                    <div>
+                        <div class="card">
+                            <h3>Системная информация</h3>
+                            <div class="info-row"><span class="info-label">Версия прошивки:</span> <span class="info-value" x-text="$store.deviceStatus.version || '—'"></span></div>
+                            <div class="info-row"><span class="info-label">Режим работы:</span> <span class="info-value" x-text="$store.deviceStatus.modeBadge.text"></span></div>
+                            <div class="info-row"><span class="info-label">Аптайм:</span> <span class="info-value" x-text="$store.uiFormat.formatUptime($store.deviceStatus.uptime)"></span></div>
+                            <div class="info-row"><span class="info-label">Свободная память (heap):</span> <span class="info-value" x-text="$store.deviceStatus.freeHeap ? $store.deviceStatus.freeHeap + ' Б' : '—'"></span></div>
+                            <div class="info-row"><span class="info-label">Последняя ошибка:</span> <span class="info-value error-text" x-text="$store.deviceStatus.lastError || '—'"></span></div>
+                        </div>
+
+                        <div class="card">
+                            <h3>Управление</h3>
+                            <div class="button-group button-group--stack">
+                                <button class="btn warning" type="button" @click="$store.deviceMaintenance.performReboot()" :disabled="$store.deviceOta.started">Перезагрузка</button>
+                                <button class="btn warning" type="button" @click="$store.deviceMaintenance.performModemReboot()" :disabled="$store.deviceOta.started">Перезагрузить модем</button>
+                                <button class="btn danger" type="button" @click="$store.deviceMaintenance.resetBaseConfig()" :disabled="$store.deviceOta.started">Сброс конфигурации</button>
+                                <button class="btn danger" type="button" @click="$store.deviceMaintenance.resetAllPrograms()" :disabled="$store.programs.loading || $store.deviceOta.started">
+                                    <span x-show="!$store.programs.loading">Сброс программ</span>
+                                    <span x-show="$store.programs.loading">
+                                        Сброс... <span x-html="$store.uiFormat.spinnerSvg"></span>
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h3>Обновление прошивки (OTA)</h3>
+                            <div class="notice notice-warning">
+                                <strong>Внимание!</strong> Не отключайте питание во время обновления.
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Файл прошивки (.bin)</label>
+                                <input type="file" class="form-control" id="firmwareFile" accept=".bin" @change="$store.deviceMaintenance.otaFileSelected" :disabled="$store.deviceOta.started">
+                            </div>
+                            <div class="ota-progress" x-show="$store.deviceOta.started">
+                                <div class="progress-text" x-text="$store.deviceOta.progress + '%'"></div>
+                                <div class="progress-bar"><div class="progress-fill" :style="{ width: $store.deviceOta.progress + '%' }"></div></div>
+                                <div class="progress-status" x-text="$store.deviceOta.status"></div>
+                            </div>
+                            <div class="button-group">
+                                <button class="btn warning" type="button" @click="$store.deviceMaintenance.startOTA()" :disabled="$store.deviceOta.started">
+                                    <span x-show="!$store.deviceOta.started">Начать обновление</span>
+                                    <span x-show="$store.deviceOta.started">
+                                        Загрузка... <span x-html="$store.uiFormat.spinnerSvg"></span>
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h3>Логи системы</h3>
+                            <pre
+                                id="logsDisplay"
+                                x-ref="logsContainer"
+                                x-text="$store.uiLogs.text"
+                                x-intersect="$store.uiLogs.setVisible(true)"
+                                x-intersect:leave="$store.uiLogs.setVisible(false)"
+                            ></pre>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="!$store.deviceStatus.loaded">
+                    <div class="card">Загрузка системной информации...</div>
+                </template>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

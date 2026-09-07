@@ -1,0 +1,413 @@
+{
+  "settings": {
+    "wifi": {
+      "title": "Wi‑Fi",
+      "fields": [
+        {
+          "key": "ssid",
+          "path": "wifi.ssid",
+          "type": "text",
+          "label": "SSID",
+          "placeholder": "",
+          "helpTitle": "Что указать",
+          "help": "Имя Wi-Fi сети, которую поднимает само устройство для локального подключения."
+        },
+        {
+          "key": "password",
+          "path": "wifi.password",
+          "type": "text",
+          "label": "Пароль",
+          "placeholder": "",
+          "helpTitle": "Что важно",
+          "help": "Пароль для Wi-Fi точки доступа устройства. С этим паролем к устройству подключаются локально."
+        },
+        {
+          "key": "ap_timeout_enabled",
+          "path": "wifi.ap_timeout_enabled",
+          "type": "toggle",
+          "label": "Таймаут AP",
+          "labelOn": "Таймаут: включен",
+          "labelOff": "Таймаут: выключен",
+          "helpTitle": "Как работает",
+          "help": "Управляет точкой доступа устройства. Если таймаут включён, точка доступа отключится автоматически через заданное время."
+        },
+        {
+          "key": "ap_timeout_sec",
+          "path": "wifi.ap_timeout_sec",
+          "type": "number",
+          "valueType": "int",
+          "label": "Таймаут AP (сек)",
+          "step": "1",
+          "min": "0",
+          "showIf": { "eq": { "path": "wifi.ap_timeout_enabled", "value": true } },
+          "helpTitle": "Что означает",
+          "help": "Через сколько секунд после запуска отключать точку доступа устройства."
+        }
+      ]
+    },
+    "gsm": {
+      "title": "GSM",
+      "fields": [
+        {
+          "key": "apn",
+          "path": "gsm.apn",
+          "type": "text",
+          "label": "APN",
+          "helpTitle": "Что указать",
+          "help": "Точка доступа оператора для мобильного интернета SIM-карты."
+        },
+        {
+          "key": "apn_user",
+          "path": "gsm.apn_user",
+          "type": "text",
+          "label": "APN пользователь",
+          "helpTitle": "Когда заполнять",
+          "help": "Заполните только если оператор требует логин для APN. В большинстве случаев поле можно оставить пустым."
+        },
+        {
+          "key": "apn_pass",
+          "path": "gsm.apn_pass",
+          "type": "text",
+          "label": "APN пароль",
+          "helpTitle": "Когда заполнять",
+          "help": "Заполните только если оператор требует пароль для APN."
+        },
+        {
+          "key": "owner_phone",
+          "path": "gsm.owner_phone",
+          "type": "text",
+          "label": "Номер владельца",
+          "placeholder": "+71234567890",
+          "helpTitle": "Как используется",
+          "help": "Номер владельца для звонков, уведомлений и GSM-команд, если эти функции включены."
+        },
+        {
+          "key": "dtmf_password",
+          "path": "gsm.dtmf_password",
+          "type": "text",
+          "label": "DTMF пароль",
+          "placeholder": "",
+          "helpTitle": "Как используется",
+          "help": "Код для управления устройством через звонок и DTMF, если этот сценарий используется."
+        }
+      ]
+    },
+    "mqtt": {
+      "title": "MQTT",
+      "fields": [
+        {
+          "key": "broker",
+          "path": "mqtt.broker",
+          "type": "text",
+          "label": "Брокер",
+          "helpTitle": "Что указать",
+          "help": "Хост или IP-адрес MQTT-брокера, например `mqtt.example.com` или `192.168.1.10`."
+        },
+        {
+          "key": "port",
+          "path": "mqtt.port",
+          "type": "number",
+          "valueType": "int",
+          "label": "Порт",
+          "min": "1",
+          "max": "65535",
+          "helpTitle": "Что указать",
+          "help": "TCP-порт MQTT-брокера. Обычно это `1883`, а для TLS-соединений - `8883`, если они поддерживаются."
+        },
+        {
+          "key": "client_id",
+          "path": "mqtt.client_id",
+          "type": "text",
+          "label": "Client ID",
+          "helpTitle": "Что важно",
+          "help": "Идентификатор клиента MQTT. Он должен быть уникальным среди всех подключений к брокеру."
+        },
+        {
+          "key": "user",
+          "path": "mqtt.user",
+          "type": "text",
+          "label": "Пользователь",
+          "helpTitle": "Когда заполнять",
+          "help": "Укажите имя пользователя, если брокер требует авторизацию. Иначе оставьте поле пустым."
+        },
+        {
+          "key": "pass",
+          "path": "mqtt.pass",
+          "type": "text",
+          "label": "Пароль",
+          "helpTitle": "Когда заполнять",
+          "help": "Укажите пароль MQTT, если брокер требует авторизацию. Используется вместе с полем \"Пользователь\"."
+        },
+        {
+          "key": "status_topic",
+          "path": "mqtt.status_topic",
+          "type": "text",
+          "label": "Status topic",
+          "helpTitle": "Как используется",
+          "help": "MQTT-топик, в который устройство публикует статус и телеметрию."
+        },
+        {
+          "key": "cmd_topic",
+          "path": "mqtt.cmd_topic",
+          "type": "text",
+          "label": "Cmd topic",
+          "helpTitle": "Как используется",
+          "help": "MQTT-топик, из которого устройство получает входящие команды."
+        },
+        {
+          "key": "publish_interval_sec",
+          "path": "mqtt.publish_interval_sec",
+          "type": "number",
+          "valueType": "int",
+          "label": "Интервал (сек)",
+          "min": "1",
+          "max": "3600",
+          "helpTitle": "Что означает",
+          "help": "Интервал между периодическими публикациями статуса в MQTT."
+        }
+      ]
+    },
+    "vehicle": {
+      "title": "Автомобиль",
+      "fields": [
+        {
+          "key": "adc_voltage_coeff",
+          "path": "vehicle.adc_voltage_coeff",
+          "type": "number",
+          "label": "Коэф. напряжения",
+          "step": "0.01",
+          "min": "0",
+          "helpTitle": "Как настроить",
+          "help": "Коэффициент пересчёта ADC в реальные вольты. Меняйте его только при калибровке напряжения."
+        },
+        {
+          "key": "starter_max_time_sec",
+          "path": "vehicle.starter_max_time_sec",
+          "type": "number",
+          "valueType": "int",
+          "label": "Макс. стартер (сек)",
+          "min": "1",
+          "helpTitle": "Что означает",
+          "help": "Максимальная длительность одной попытки запуска. Защищает стартер от перегрева."
+        },
+        {
+          "key": "wait_after_start_sec",
+          "path": "vehicle.wait_after_start_sec",
+          "type": "number",
+          "valueType": "int",
+          "label": "Пауза после запуска (сек)",
+          "min": "0",
+          "helpTitle": "Что означает",
+          "help": "Пауза после попытки запуска перед следующими проверками или действиями."
+        },
+        {
+          "key": "engine_running_voltage_threshold",
+          "path": "vehicle.engine_running_voltage_threshold",
+          "type": "number",
+          "label": "Порог запуска двигателя (В)",
+          "step": "0.1",
+          "min": "0",
+          "helpTitle": "Как работает",
+          "help": "Если выбран контроль по напряжению, то при превышении этого порога двигатель считается запущенным."
+        },
+        {
+          "key": "engine_stopped_voltage_threshold",
+          "path": "vehicle.engine_stopped_voltage_threshold",
+          "type": "number",
+          "label": "Порог останова двигателя (В)",
+          "step": "0.1",
+          "min": "0",
+          "helpTitle": "Как работает",
+          "help": "Если напряжение опускается ниже этого порога, двигатель считается остановленным. Используется как нижняя граница гистерезиса."
+        },
+        {
+          "key": "starter_relay_id",
+          "path": "vehicle.starter_relay_id",
+          "type": "select",
+          "label": "Реле стартера",
+          "optionsFrom": "relays",
+          "helpTitle": "Что важно",
+          "help": "Выберите реле, которое физически подключено к цепи стартера. Ошибка в этом поле опасна."
+        },
+        {
+          "key": "engine_detection_source",
+          "path": "vehicle.engine_detection_source",
+          "type": "select",
+          "label": "Определение статуса двигателя",
+          "options": [
+            { "value": "voltage", "label": "По напряжению" },
+            { "value": "input", "label": "По входу" }
+          ],
+          "helpTitle": "Что выбрать",
+          "help": "Задаёт способ определения запущенного двигателя: по напряжению или по отдельному входу."
+        },
+        {
+          "key": "engine_input_id",
+          "path": "vehicle.engine_input_id",
+          "type": "select",
+          "valueType": "int",
+          "label": "Вход для контроля двигателя",
+          "showIf": { "eq": { "path": "vehicle.engine_detection_source", "value": "input" } },
+          "optionsFrom": "inputIds",
+          "helpTitle": "Когда используется",
+          "help": "Выберите вход, который означает состояние \"двигатель работает\". Используется только в режиме контроля по входу."
+        }
+      ]
+    },
+    "sensors": {
+      "title": "Датчики",
+      "repeatFrom": "MAX_SENSORS",
+      "itemTitlePrefix": "Датчик",
+      "fields": [
+        {
+          "key": "rom",
+          "pathTmpl": "sensors.{i}.rom",
+          "type": "select",
+          "label": "ROM (DS18B20)",
+          "optionsFrom": "sensorRoms",
+          "helpTitle": "Что выбрать",
+          "help": "Уникальный ROM-код датчика DS18B20. Выберите одно из устройств, найденных на шине 1-Wire."
+        },
+        {
+          "key": "name",
+          "pathTmpl": "sensors.{i}.name",
+          "type": "text",
+          "label": "Пользовательское имя",
+          "helpTitle": "Как отображается",
+          "help": "Понятное имя датчика для интерфейса и списков, например `Двигатель` или `Салон`."
+        },
+        {
+          "key": "coeff",
+          "pathTmpl": "sensors.{i}.coeff",
+          "type": "number",
+          "label": "Коэффициент коррекции",
+          "step": "0.1",
+          "helpTitle": "Как настроить",
+          "help": "Поправка для калибровки конкретного датчика температуры."
+        }
+      ]
+    },
+    "inputs": {
+      "title": "Входы",
+      "repeatFrom": "MAX_INPUTS",
+      "itemTitleFrom": "inputs",
+      "fields": [
+        {
+          "bind": "enabled",
+          "pathTmpl": "inputs.{i}.enabled",
+          "type": "toggle",
+          "label": "Включён при старте",
+          "labelOn": "Вход активен",
+          "labelOff": "Вход выключен",
+          "helpTitle": "Как работает",
+          "help": "Определяет, участвует ли вход в логике устройства сразу после запуска."
+        },
+        {
+          "bind": "id",
+          "pathTmpl": "inputs.{i}.id",
+          "type": "number",
+          "label": "ID",
+          "hidden": true,
+          "helpTitle": "Служебное",
+          "help": "Стабильный идентификатор входа, который используется во внутренних ссылках и настройках."
+        },
+        {
+          "bind": "name",
+          "pathTmpl": "inputs.{i}.name",
+          "type": "text",
+          "label": "Пользовательское имя",
+          "helpTitle": "Как отображается",
+          "help": "Понятное имя входа в интерфейсе, например `Зажигание`, `Дверь` или `Генератор`."
+        },
+        {
+          "bind": "type",
+          "pathTmpl": "inputs.{i}.type",
+          "type": "select",
+          "label": "Тип",
+          "options": [ { "value": 0, "label": "Дискретный" }, { "value": 1, "label": "Счётчик импульсов" } ],
+          "helpTitle": "Что выбрать",
+          "help": "Дискретный вход читает состояния HIGH/LOW. Счётчик импульсов используется для частоты, оборотов и похожих сигналов."
+        },
+        {
+          "bind": "active_state",
+          "pathTmpl": "inputs.{i}.active_state",
+          "type": "select",
+          "label": "Активный уровень",
+          "showIf": { "eq": { "pathTmpl": "inputs.{i}.type", "value": 0 } },
+          "options": [ { "value": true, "label": "HIGH" }, { "value": false, "label": "LOW" } ],
+          "helpTitle": "Когда используется",
+          "help": "Для дискретного входа задаёт уровень, который считается активным. Выберите вариант под вашу схему подключения."
+        },
+        {
+          "bind": "pulse.pulses_per_rev",
+          "pathTmpl": "inputs.{i}.pulse.pulses_per_rev",
+          "type": "number",
+          "valueType": "int",
+          "min": "1",
+          "step": "1",
+          "label": "Импульсов на оборот",
+          "showIf": { "eq": { "pathTmpl": "inputs.{i}.type", "value": 1 } },
+          "helpTitle": "Когда используется",
+          "help": "Для счётчика импульсов задаёт, сколько импульсов соответствует одному обороту или одной единице вашей системы."
+        },
+        {
+          "bind": "pulse.threshold_rpm",
+          "pathTmpl": "inputs.{i}.pulse.threshold_rpm",
+          "type": "number",
+          "valueType": "int",
+          "min": "0",
+          "step": "1",
+          "label": "Порог срабатывания (об/мин)",
+          "showIf": { "eq": { "pathTmpl": "inputs.{i}.type", "value": 1 } },
+          "helpTitle": "Как работает",
+          "help": "Значения ниже этого порога считаются незначимыми. Помогает отсечь шум и дребезг."
+        }
+      ]
+    },
+    "triggers": {
+      "title": "Триггеры",
+      "inputFields": [
+        { "bind": "id", "type": "number", "label": "ID", "hidden": true, "helpTitle": "Служебное", "help": "Внутренний идентификатор триггера." },
+        { "bind": "enabled", "type": "toggle", "label": "Включён по умолчанию", "labelOn": "Триггер активен", "labelOff": "Триггер выключен", "helpTitle": "Как работает", "help": "Определяет, активен ли триггер сразу после запуска устройства." },
+        { "bind": "input_id", "type": "select", "valueType": "int", "label": "Вход", "optionsFrom": "inputIds", "helpTitle": "Что выбрать", "help": "Выберите вход, состояние которого должен отслеживать триггер." },
+        { "bind": "trigger_level", "type": "select", "label": "Уровень срабатывания", "options": [ { "value": 0, "label": "LOW" }, { "value": 1, "label": "HIGH" } ], "helpTitle": "Что означает", "help": "Определяет, при каком уровне на входе триггер запускает программу." },
+        { "bind": "program_id", "type": "select", "label": "Программа", "optionsFrom": "programs", "helpTitle": "Что делает", "help": "Программа, которая запускается при срабатывании триггера." }
+      ],
+      "tempFields": [
+        { "bind": "id", "type": "number", "label": "ID", "hidden": true, "helpTitle": "Служебное", "help": "Внутренний идентификатор триггера." },
+        { "bind": "enabled", "type": "toggle", "label": "Включён по умолчанию", "labelOn": "Триггер активен", "labelOff": "Триггер выключен", "helpTitle": "Как работает", "help": "Определяет, активен ли триггер сразу после запуска устройства." },
+        { "bind": "sensor_id", "type": "select", "label": "Датчик", "optionsFrom": "sensorIds", "helpTitle": "Что выбрать", "help": "Выберите датчик температуры, за которым должен следить триггер." },
+        { "bind": "sensor_name", "type": "text", "label": "Имя датчика (сохранённое)", "hidden": true, "helpTitle": "Служебное", "help": "Сохранённое имя выбранного датчика для интерфейса и совместимости." },
+        { "bind": "comparison", "type": "select", "label": "Сравнение", "options": [ { "value": "above", "label": "Выше" }, { "value": "below", "label": "Ниже" } ], "helpTitle": "Что означает", "help": "Определяет, должна ли температура быть выше или ниже заданного порога." },
+        { "bind": "threshold", "type": "number", "label": "Порог", "step": "0.1", "helpTitle": "Что означает", "help": "Температура, относительно которой срабатывает триггер." },
+        { "bind": "program_id", "type": "select", "label": "Программа", "optionsFrom": "programs", "helpTitle": "Что делает", "help": "Программа, которая запускается при срабатывании триггера." }
+      ]
+    },
+    "thermostat": {
+      "title": "Термостат",
+      "fields": [
+        { "key": "enabled", "path": "thermostat.enabled", "type": "toggle", "label": "Включён", "labelOn": "Термостат включен", "labelOff": "Термостат выключен", "helpTitle": "Как работает", "help": "Включает автоматическое управление по температуре с выбранными порогами." },
+        { "key": "sensor_id", "path": "thermostat.sensor_id", "type": "select", "label": "Датчик", "optionsFrom": "sensorIds", "helpTitle": "Что выбрать", "help": "Датчик температуры, по которому термостат принимает решение." },
+        { "key": "sensor_name", "path": "thermostat.sensor_name", "type": "text", "label": "Имя датчика (сохранённое)", "hidden": true, "helpTitle": "Служебное", "help": "Сохранённое имя выбранного датчика для интерфейса и совместимости." },
+        { "key": "comparison", "path": "thermostat.comparison", "type": "select", "label": "Сравнение", "options": [ { "value": "above", "label": "Выше" }, { "value": "below", "label": "Ниже" } ], "helpTitle": "Что означает", "help": "Определяет, реагирует ли термостат на превышение порога или на падение ниже него." },
+        { "key": "lower_threshold", "path": "thermostat.lower_threshold", "type": "number", "label": "Нижний порог", "step": "0.1", "helpTitle": "Что означает", "help": "Нижняя граница гистерезиса для термостата." },
+        { "key": "upper_threshold", "path": "thermostat.upper_threshold", "type": "number", "label": "Верхний порог", "step": "0.1", "helpTitle": "Что означает", "help": "Верхняя граница гистерезиса для термостата." },
+        { "key": "program_id_lower", "path": "thermostat.program_id_lower", "type": "select", "label": "Программа ↓", "optionsFrom": "programs", "helpTitle": "Что делает", "help": "Программа, которая выполняется при переходе в состояние `ниже`." },
+        { "key": "program_id_upper", "path": "thermostat.program_id_upper", "type": "select", "label": "Программа ↑", "optionsFrom": "programs", "helpTitle": "Что делает", "help": "Программа, которая выполняется при переходе в состояние `выше`." }
+      ]
+    },
+    "battery": {
+      "title": "Battery Saver",
+      "fields": [
+        { "key": "enabled", "path": "battery_saver.enabled", "type": "toggle", "label": "Включён", "labelOn": "Battery Saver включен", "labelOff": "Battery Saver выключен", "helpTitle": "Как работает", "help": "Включает защитную логику при просадке питания." },
+        { "key": "voltage_start_threshold", "path": "battery_saver.voltage_start_threshold", "type": "number", "label": "Порог старта (В)", "step": "0.1", "helpTitle": "Что означает", "help": "Если напряжение падает ниже этого значения, Battery Saver получает право на срабатывание." },
+        { "key": "voltage_abort_threshold", "path": "battery_saver.voltage_abort_threshold", "type": "number", "label": "Порог аварии (В)", "step": "0.1", "helpTitle": "Что важно", "help": "Если напряжение падает ниже этого порога, попытки немедленно прекращаются для защиты аккумулятора и системы." },
+        { "key": "hysteresis", "path": "battery_saver.hysteresis", "type": "number", "label": "Гистерезис", "step": "0.1", "helpTitle": "Как работает", "help": "Добавляет запас по напряжению, чтобы избежать частых переключений около порога." },
+        { "key": "min_low_voltage_duration_sec", "path": "battery_saver.min_low_voltage_duration_sec", "type": "number", "valueType": "int", "label": "Мин. длительность (сек)", "step": "1", "helpTitle": "Как работает", "help": "Напряжение должно оставаться низким не меньше этого времени, чтобы событие считалось реальным." },
+        { "key": "min_time_between_attempts_sec", "path": "battery_saver.min_time_between_attempts_sec", "type": "number", "valueType": "int", "label": "Мин. интервал (сек)", "step": "1", "helpTitle": "Что означает", "help": "Минимальный интервал между двумя срабатываниями Battery Saver." },
+        { "key": "max_attempts_per_day", "path": "battery_saver.max_attempts_per_day", "type": "number", "valueType": "int", "label": "Попыток в день", "step": "1", "helpTitle": "Что означает", "help": "Максимальное число срабатываний Battery Saver в течение суток." },
+        { "key": "program_id", "path": "battery_saver.program_id", "type": "select", "label": "Программа", "optionsFrom": "programs", "helpTitle": "Что делает", "help": "Программа, которая выполняется при срабатывании Battery Saver." }
+      ]
+    }
+  }
+}

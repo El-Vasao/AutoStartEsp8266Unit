@@ -1,0 +1,203 @@
+{
+  "programSteps": {
+    "params": {
+      "relay_id": {
+        "label": "Реле",
+        "type": "select",
+        "optionsFrom": "relays",
+        "valueType": "int",
+        "helpTitle": "Что выбрать",
+        "help": "Укажите реле, которым управляет этот шаг. Список берётся из аппаратной карты устройства.",
+        "default": 2001
+      },
+      "ms": {
+        "label": "Длительность (с)",
+        "type": "number",
+        "valueType": "float",
+        "step": 0.1,
+        "min": 0,
+        "helpTitle": "Как работает",
+        "help": "Задаёт длительность шага в секундах. Для паузы это время ожидания, для импульса - длительность каждой фазы.",
+        "default": 1
+      },
+      "input_id": {
+        "label": "Вход",
+        "type": "select",
+        "optionsFrom": "inputs",
+        "valueType": "int",
+        "helpTitle": "Что выбрать",
+        "help": "Укажите вход, который использует этот шаг. Список берётся из аппаратной карты устройства.",
+        "default": 1001
+      },
+      "input_trigger_id": {
+        "label": "Триггер (вход)",
+        "type": "select",
+        "optionsFrom": "inputTriggerIds",
+        "valueType": "int",
+        "helpTitle": "Что делает",
+        "help": "Определяет, какой входной триггер нужно включить или отключить этим шагом.",
+        "default": 0
+      },
+      "temp_trigger_id": {
+        "label": "Триггер (температура)",
+        "type": "select",
+        "optionsFrom": "tempTriggerIds",
+        "valueType": "int",
+        "helpTitle": "Что делает",
+        "help": "Определяет, какой температурный триггер нужно включить или отключить этим шагом.",
+        "default": 0
+      },
+      "retries": {
+        "label": "Попытки",
+        "type": "number",
+        "valueType": "int",
+        "step": 1,
+        "min": 1,
+        "helpTitle": "Как работает",
+        "help": "Задаёт число повторных попыток для шагов, которые их поддерживают, например для запуска стартера.",
+        "default": 1
+      },
+      "sensor_id": {
+        "label": "Датчик",
+        "type": "select",
+        "optionsFrom": "sensorIds",
+        "valueType": "int",
+        "helpTitle": "Что выбрать",
+        "help": "Укажите датчик температуры, который участвует в этом шаге или условии.",
+        "default": 0
+      },
+      "sensor_name": {
+        "label": "Имя датчика (сохранённое)",
+        "type": "text",
+        "valueType": "string",
+        "default": "",
+        "hidden": true
+      },
+      "program_id": {
+        "label": "Программа",
+        "type": "select",
+        "optionsFrom": "programs",
+        "valueType": "int",
+        "helpTitle": "Что выбрать",
+        "help": "Укажите программу, которую этот шаг должен запустить или использовать.",
+        "default": 0
+      },
+      "timeout_ms": {
+        "label": "Таймаут (с)",
+        "type": "number",
+        "valueType": "float",
+        "step": 0.1,
+        "min": 0,
+        "helpTitle": "Как работает",
+        "help": "Ограничивает максимальное время выполнения шага в секундах. Значение `0` означает, что таймаут не задан.",
+        "default": 0
+      },
+      "expected_state": {
+        "label": "Состояние",
+        "type": "select",
+        "valueType": "int",
+        "options": [ { "value": 0, "label": "OFF" }, { "value": 1, "label": "ON" } ],
+        "helpTitle": "Что означает",
+        "help": "Задаёт состояние, которого ждёт или которое проверяет шаг.",
+        "default": 1
+      },
+      "comparison": {
+        "label": "Сравнение",
+        "type": "select",
+        "valueType": "string",
+        "options": [ { "value": "above", "label": "Выше" }, { "value": "below", "label": "Ниже" } ],
+        "helpTitle": "Что означает",
+        "help": "Определяет, должно ли значение быть выше или ниже заданного порога.",
+        "default": "above"
+      },
+      "threshold": {
+        "label": "Порог",
+        "type": "number",
+        "valueType": "float",
+        "step": 0.1,
+        "helpTitle": "Что означает",
+        "help": "Числовое значение, с которым шаг сравнивает сигнал, температуру или другое условие.",
+        "default": 0
+      },
+      "engine_state": {
+        "label": "Двигатель",
+        "type": "select",
+        "valueType": "int",
+        "options": [ { "value": 0, "label": "OFF" }, { "value": 1, "label": "ON" } ],
+        "helpTitle": "Что означает",
+        "help": "Задаёт состояние двигателя, которое используется в условии шага.",
+        "default": 1
+      },
+      "timeout_action": {
+        "label": "При таймауте",
+        "type": "select",
+        "valueType": "int",
+        "options": [ { "value": 0, "label": "Остановить" }, { "value": 1, "label": "Пропустить шаги" } ],
+        "helpTitle": "Что делает",
+        "help": "Определяет, что делать, если шаг не успел завершиться до таймаута.",
+        "default": 0
+      },
+      "skip_count": {
+        "label": "Пропустить",
+        "type": "number",
+        "valueType": "int",
+        "min": 1,
+        "step": 1,
+        "helpTitle": "Когда используется",
+        "help": "Задаёт, сколько следующих шагов пропустить, если для таймаута выбрано действие \"Пропустить шаги\".",
+        "default": 1
+      }
+    },
+    "actionCategories": [
+      {
+        "name": "Реле",
+        "actions": [
+          { "value": "RELAY_ON", "label": "Включить", "params": ["relay_id"] },
+          { "value": "RELAY_OFF", "label": "Выключить", "params": ["relay_id"] },
+          { "value": "RELAY_TOGGLE", "label": "Переключить", "params": ["relay_id"] },
+          { "value": "RELAY_PULSE_ON_OFF_ON", "label": "Импульс ON→OFF→ON", "params": ["relay_id", "ms"] },
+          { "value": "RELAY_PULSE_OFF_ON_OFF", "label": "Импульс OFF→ON→OFF", "params": ["relay_id", "ms"] }
+        ]
+      },
+      {
+        "name": "Задержки",
+        "actions": [
+          { "value": "WAIT", "label": "Пауза", "params": ["ms"] }
+        ]
+      },
+      {
+        "name": "Стартер",
+        "actions": [
+          { "value": "STARTER_TIMED", "label": "Запуск по времени", "params": ["ms", "retries"] },
+          { "value": "STARTER_WAIT_INPUT", "label": "Запуск до сигнала на входе", "params": ["input_id", "retries"] }
+        ]
+      },
+      {
+        "name": "Входы",
+        "actions": [
+          { "value": "INPUT_ENABLE", "label": "Включить", "params": ["input_id"] },
+          { "value": "INPUT_DISABLE", "label": "Отключить", "params": ["input_id"] }
+        ]
+      },
+      {
+        "name": "Триггеры",
+        "actions": [
+          { "value": "INPUT_TRIGGER_ENABLE", "label": "Вход: включить", "params": ["input_trigger_id"] },
+          { "value": "INPUT_TRIGGER_DISABLE", "label": "Вход: отключить", "params": ["input_trigger_id"] },
+          { "value": "TEMP_TRIGGER_ENABLE", "label": "Температура: включить", "params": ["temp_trigger_id"] },
+          { "value": "TEMP_TRIGGER_DISABLE", "label": "Температура: отключить", "params": ["temp_trigger_id"] }
+        ]
+      },
+      {
+        "name": "Функции",
+        "actions": [
+          { "value": "BATTERY_SAVER_ON", "label": "Battery Saver ON", "params": [] },
+          { "value": "BATTERY_SAVER_OFF", "label": "Battery Saver OFF", "params": [] },
+          { "value": "THERMOSTAT_ON", "label": "Термостат ON", "params": [] },
+          { "value": "THERMOSTAT_OFF", "label": "Термостат OFF", "params": [] }
+        ]
+      }
+    ]
+  }
+}
+

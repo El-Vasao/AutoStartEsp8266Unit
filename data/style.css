@@ -1,0 +1,1397 @@
+/* ====================================================
+   Тема и переменные
+   ==================================================== */
+:root {
+    /* Unified with fallback (Recovery OTA) dark theme */
+    --bg-primary: #0b1220;
+    --bg-card: #111a2e;
+    --bg-elevated: #0f1830;
+
+    --text-primary: #e6edf3;
+    --text-secondary: #c9d4e5;
+    --text-muted: #9fb0c8;
+
+    --accent: #2f81f7;
+    --accent-contrast: #ffffff;
+    --accent-light: #1a2a4a;
+
+    --border: #223055;
+    --border-soft: #1b2746;
+
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #fb7185;
+
+    --shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+    --shadow-soft: 0 6px 18px rgb(0 0 0 / 0.25);
+    --ring: 0 0 0 2px rgba(47, 129, 247, 0.18);
+
+    /* Spacing / sizing scale (keep UI rhythm consistent) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+
+    --radius-1: 10px;
+    --radius-2: 12px;
+    --radius-3: 14px;
+
+    --control-h: 42px;
+    --help-btn-size: 32px;
+}
+
+/* ===== small utility classes (avoid inline styles) ===== */
+.z-60 { z-index: 60; }
+.modal-card--sm { max-width: 420px; }
+.justify-end { justify-content: flex-end; }
+.minw-120 { min-width: 120px; }
+.mt-10 { margin-top: 10px; }
+.mt-16 { margin-top: 16px; }
+.mt-20 { margin-top: 20px; }
+.flex-1 { flex: 1; }
+.w-100 { width: 100%; }
+.m-0 { margin: 0; }
+.row-flex { display: flex; }
+.wrap { flex-wrap: wrap; }
+.gap-8 { gap: 8px; }
+.align-end { align-items: flex-end; }
+.align-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.container {
+    /* fallback page uses wider layout; keep mobile-friendly via media queries below */
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--bg-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Шапка + статус-бар */
+.site-header {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px 10px;
+}
+
+.header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.site-header h1 {
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: 0.2px;
+    margin: 0;
+}
+
+.status-bar {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.status-strip {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border-soft);
+    font-size: 0.88rem;
+    line-height: 1.35;
+}
+
+.status-strip-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-primary);
+}
+
+.status-strip-text strong {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+}
+
+.status-strip-ota {
+    background: rgba(47, 129, 247, 0.12);
+    border-color: rgba(47, 129, 247, 0.35);
+}
+
+.status-strip-success {
+    background: rgba(52, 211, 153, 0.12);
+    border-color: rgba(52, 211, 153, 0.4);
+}
+
+.status-strip-danger {
+    background: rgba(251, 113, 133, 0.12);
+    border-color: rgba(251, 113, 133, 0.45);
+}
+
+.status-strip-dirty {
+    background: rgba(251, 191, 36, 0.08);
+    border-color: rgba(251, 191, 36, 0.28);
+}
+
+.status-strip-info {
+    background: rgba(47, 129, 247, 0.10);
+    border-color: rgba(47, 129, 247, 0.3);
+}
+
+.status-strip-warning {
+    background: rgba(251, 191, 36, 0.10);
+    border-color: rgba(251, 191, 36, 0.35);
+}
+
+.status-strip-error {
+    background: rgba(251, 113, 133, 0.10);
+    border-color: rgba(251, 113, 133, 0.38);
+}
+
+.btn.compact {
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.btn.compact.light {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.status-dismiss {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.25rem;
+    line-height: 1;
+    padding: 0 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.status-dismiss:hover {
+    color: var(--text-primary);
+}
+
+.status-validation {
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(251, 113, 133, 0.4);
+    background: rgba(251, 113, 133, 0.08);
+    font-size: 0.86rem;
+}
+.status-validation strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--danger);
+}
+.status-validation ul {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+.status-validation li {
+    margin: 4px 0;
+}
+
+/* Unsaved changes highlighting (only after user attempted to leave Settings) */
+.unsaved-hint .tab-button.unsaved:not(.active) {
+    background: rgba(251, 191, 36, 0.12);
+    color: var(--text-primary);
+    border-color: rgba(251, 191, 36, 0.28);
+}
+.unsaved-hint .subtab-bar .settings-subtab-button.unsaved:not(.active) {
+    background: rgba(251, 191, 36, 0.12);
+    color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.28);
+}
+.unsaved-hint .settings-subtab-pane input.form-control.field-changed,
+.unsaved-hint .settings-subtab-pane select.form-control.field-changed {
+    background-color: rgba(251, 191, 36, 0.20);
+    border-color: rgba(251, 191, 36, 0.55);
+}
+.unsaved-hint .settings-subtab-pane .toggle-switch.field-changed {
+    background-color: rgba(251, 191, 36, 0.22);
+    border-color: rgba(251, 191, 36, 0.6);
+}
+
+/* Валидация: красная подсветка полей (перебивает changed/new) */
+.settings-subtab-pane input.form-control.field-invalid,
+.settings-subtab-pane select.form-control.field-invalid {
+    background-color: rgba(251, 113, 133, 0.20);
+    border-color: rgba(251, 113, 133, 0.65);
+}
+.settings-subtab-pane .toggle-switch.field-invalid {
+    background-color: rgba(251, 113, 133, 0.20);
+    border-color: rgba(251, 113, 133, 0.65);
+}
+
+/* Programs editor: highlight changed fields only after "unsaved" hint is triggered */
+.unsaved-hint .program-editor input.form-control.field-changed,
+.unsaved-hint .program-editor select.form-control.field-changed,
+.unsaved-hint .program-editor .step-param-group .form-control.field-changed,
+.unsaved-hint .program-editor .step-param-group select.form-control.field-changed {
+    background-color: rgba(251, 191, 36, 0.38);
+    border-color: rgba(251, 191, 36, 0.75);
+}
+
+/* Green “new item” highlights removed (too noisy). */
+
+.revert-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.status-badge {
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 4px 10px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+}
+
+/* Badge tones (for header/status badges) */
+.status-badge.tone-neutral {
+    background: rgba(159, 176, 200, 0.10);
+    color: var(--text-secondary);
+    border-color: var(--border-soft);
+}
+.status-badge.tone-info {
+    background: rgba(47, 129, 247, 0.12);
+    color: #93c5fd;
+    border-color: rgba(47, 129, 247, 0.35);
+}
+.status-badge.tone-success {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--success);
+    border-color: rgba(52, 211, 153, 0.40);
+}
+.status-badge.tone-warning {
+    background: rgba(251, 191, 36, 0.12);
+    color: var(--warning);
+    border-color: rgba(251, 191, 36, 0.38);
+}
+.status-badge.tone-danger {
+    background: rgba(251, 113, 133, 0.12);
+    color: var(--danger);
+    border-color: rgba(251, 113, 133, 0.45);
+}
+
+main {
+    flex: 1;
+    padding: var(--space-4);
+}
+
+/* ====================================================
+   Карточки и информационные строки
+   ==================================================== */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-3);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+    box-shadow: var(--shadow);
+}
+
+.card h3 {
+    font-size: 1rem;
+    margin-bottom: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+.card h4 {
+    font-size: 0.9rem;
+    margin: 10px 0 6px;
+    color: var(--text-secondary);
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+}
+.info-row:last-child {
+    border-bottom: none;
+}
+.info-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+.info-value {
+    font-weight: 500;
+    font-family: monospace;
+    font-size: 0.9rem;
+}
+/* .error-text defined later with size/margins */
+
+/* ====================================================
+   Плитки (для датчиков, входов, реле, триггеров)
+   ==================================================== */
+.tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+}
+.tile-grid-wide {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.tile {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    padding: 10px 6px;
+    text-align: center;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+    transition: transform 0.1s ease, background-color 0.2s ease;
+    cursor: pointer;
+    user-select: none;
+}
+.tile-wide {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+.tile:active {
+    transform: scale(0.97);
+}
+.tile-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tile-sub {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tile.empty {
+    background-color: var(--bg-elevated);
+    color: var(--text-muted);
+    font-style: italic;
+    grid-column: 1 / -1;
+}
+
+/* Температурные классы */
+.temp-cold { background-color: rgba(56, 189, 248, 0.14); border-color: rgba(56, 189, 248, 0.35); }
+.temp-normal { background-color: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.35); }
+.temp-hot { background-color: rgba(251, 113, 133, 0.14); border-color: rgba(251, 113, 133, 0.35); }
+
+/* Реле */
+.relay-on { background-color: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.35); }
+.relay-off { background-color: var(--bg-elevated); border-color: var(--border-soft); }
+.relay-tile { pointer-events: none; cursor: default; }
+
+/* Входы */
+.input-active { background-color: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.35); }
+.input-inactive { background-color: var(--bg-elevated); border-color: var(--border-soft); }
+.input-counter { background-color: rgba(251, 191, 36, 0.14); border-color: rgba(251, 191, 36, 0.35); }
+.input-disabled { background-color: rgba(159, 176, 200, 0.10); border-color: var(--border-soft); opacity: 0.6; }
+
+/* Триггеры и функции */
+.trigger-on, .feature-on { background-color: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.35); }
+.trigger-off, .feature-off { background-color: var(--bg-elevated); border-color: var(--border-soft); }
+
+/* ====================================================
+   Переключатели (тумблеры)
+   ==================================================== */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #2d374d;
+    transition: .2s;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--text-primary);
+    transition: .2s;
+}
+input:checked + .slider {
+    background-color: var(--accent);
+}
+input:checked + .slider:before {
+    transform: translateX(24px);
+}
+.slider.round {
+    border-radius: 22px;
+}
+.slider.round:before {
+    border-radius: 50%;
+}
+
+/* ====================================================
+   Кнопки и группы кнопок
+   ==================================================== */
+.button-group {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+}
+.button-group--stack {
+    flex-direction: column;
+}
+
+.btn {
+    min-height: var(--control-h);
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    font-size: 0.9rem;
+    font-weight: 650;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+    flex: 1 1 auto;
+}
+
+/* Header rows inside cards: (reserved) */
+.notice {
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    padding: 12px 14px;
+    box-shadow: var(--shadow-soft);
+    color: var(--text-secondary);
+    margin: 10px 0;
+}
+.notice strong { color: var(--text-primary); }
+.notice-warning { border-color: rgba(251, 191, 36, 0.55); }
+.notice-danger { border-color: rgba(251, 113, 133, 0.55); }
+.notice-info { border-color: rgba(47, 129, 247, 0.55); }
+.notice-success { border-color: rgba(52, 211, 153, 0.45); }
+
+.notice a, .notice button.link {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 650;
+    cursor: pointer;
+}
+.notice a:hover, .notice button.link:hover { text-decoration: underline; }
+
+.btn:hover {
+    border-color: rgba(47, 129, 247, 0.55);
+    box-shadow: 0 10px 26px rgb(0 0 0 / 0.25);
+    transform: translateY(-1px);
+}
+.btn:active {
+    transform: translateY(0) scale(0.98);
+}
+.btn.primary {
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border: none;
+}
+.btn.warning {
+    background: var(--warning);
+    color: #111827;
+    border: none;
+}
+.btn.danger {
+    background: var(--danger);
+    color: #111827;
+    border: none;
+}
+.btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* ====================================================
+   Global UI lock (during flash commit)
+   ==================================================== */
+.ui-locked {
+    opacity: 0.65;
+}
+.ui-locked main,
+.ui-locked nav,
+.ui-locked header {
+    pointer-events: none;
+}
+/* Статус-бар оставляем кликабельным (перезагрузка и т.д.) во время записи во flash */
+.ui-locked header .status-bar {
+    pointer-events: auto;
+}
+
+/* ====================================================
+   Initial load backdrop (constants + settings)
+   ==================================================== */
+.init-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(11, 18, 32, 0.78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+}
+.init-card {
+    width: min(520px, calc(100% - 24px));
+    background: rgba(17, 26, 46, 0.96);
+    border: 1px solid rgba(34, 48, 85, 0.85);
+    box-shadow: var(--shadow);
+    border-radius: 14px;
+    padding: 14px 16px;
+    text-align: center;
+}
+.init-title {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+.init-sub {
+    color: var(--text-muted);
+    font-size: 0.92rem;
+}
+
+/* ====================================================
+   Основные вкладки
+   ==================================================== */
+.tab-bar {
+    display: flex;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    padding: var(--space-2);
+    gap: var(--space-1);
+}
+.tab-button {
+    flex: 1;
+    background: transparent;
+    border: 1px solid transparent;
+    min-height: var(--control-h);
+    padding: 10px 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    border-radius: var(--radius-1);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+.tab-button:hover {
+    background: rgba(47, 129, 247, 0.10);
+}
+.tab-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: rgba(45, 55, 77, 0.55); /* слегка заметная плашка "заблокировано" */
+    color: var(--text-muted);
+}
+.tab-button.active {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 500;
+    border-color: var(--border);
+}
+/* old dirty hint removed (replaced by .unsaved-hint gating) */
+
+/* ====================================================
+   Дочерние вкладки (внутри настроек)
+   ==================================================== */
+.subtab-bar {
+    display: flex;
+    flex-wrap: wrap;
+    background: var(--bg-card);
+    border-radius: var(--radius-3);
+    padding: var(--space-1);
+    margin-bottom: var(--space-4);
+    gap: var(--space-1);
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+    border: 1px solid var(--border);
+}
+.subtab-bar .settings-subtab-button {
+    flex: 1 0 auto;
+    background: transparent;
+    border: none;
+    padding: 6px 0;
+    font-size: 0.8rem;
+    font-weight: 650;
+    color: var(--text-secondary);
+    border-radius: 10px;
+    transition: all 0.2s;
+    cursor: pointer;
+    text-align: center;
+    min-width: 70px;
+}
+.subtab-bar .settings-subtab-button:hover {
+    background: rgba(47, 129, 247, 0.10);
+}
+.subtab-bar .settings-subtab-button.active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+/* old dirty hint removed (replaced by .unsaved-hint gating) */
+
+.subtab-bar .settings-subtab-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.settings-subtab-pane {
+    display: none;
+}
+.settings-subtab-pane.active {
+    display: block;
+}
+
+/* ====================================================
+   Панель управления: сетка из двух колонок
+   ==================================================== */
+.panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.panel-grid .card {
+    margin-bottom: 0;
+}
+
+/* ====================================================
+   Формы
+   ==================================================== */
+.form-group {
+    margin-bottom: 12px;
+}
+.form-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+/* Inline help popovers (anchor plugin) */
+/* Control row: input/select/toggle + help button on the right */
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.control-row .control-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.help-btn {
+    width: var(--help-btn-size);
+    height: var(--help-btn-size);
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.help-btn.help-btn-control {
+    /* keep icon buttons consistent across field types */
+}
+.help-btn.help-btn-toggle {
+    /* keep icon buttons consistent across field types */
+}
+.help-btn:hover {
+    border-color: rgba(47, 129, 247, 0.55);
+    color: var(--text-primary);
+}
+.help-popover {
+    width: 100%;
+    background: rgba(17, 26, 46, 0.98);
+    color: var(--text-primary);
+    border: 1px solid rgba(34, 48, 85, 0.9);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    /* Keep first/last line visually balanced */
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.help-inline-wrap {
+    padding-top: 8px;
+    overflow: hidden;
+    will-change: height;
+}
+.help-popover-title {
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 0; /* spacing controlled via .help-popover-title + p */
+    font-size: 0.8rem;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+}
+.help-popover-title + p {
+    margin-top: 2px;
+}
+.help-popover-title-error {
+    color: var(--danger);
+    margin-bottom: 0;
+}
+.help-popover-text-error {
+    /* close to "Ошибка", then separate from help section */
+    margin: 2px 0 12px 0;
+}
+.help-popover p {
+    margin: 0;
+    color: var(--text-primary);
+}
+.help-popover p.help-popover-text-error {
+    color: var(--danger);
+}
+/* Separation between error block and help block is owned by error text itself (patternMessage). */
+.help-popover p + p {
+    margin-top: 8px;
+}
+.form-control {
+    width: 100%;
+    min-height: var(--control-h);
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    font-size: 0.85rem;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+.form-control:focus {
+    outline: none;
+    border-color: rgba(47, 129, 247, 0.85);
+    box-shadow: var(--ring);
+}
+
+/* Improve selects/text inputs consistently */
+select.form-control {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+                      linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 12px) calc(50% - 3px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 34px;
+}
+.form-control:disabled {
+    background: rgba(159, 176, 200, 0.08);
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+/* Toggle switch (вместо checkbox) */
+.toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+.toggle-switch {
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    position: relative;
+    padding: 0;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    transform: translateY(-50%);
+    background: var(--text-secondary);
+    transition: left 0.2s, background-color 0.2s;
+}
+.toggle-switch.on {
+    background: rgba(47, 129, 247, 0.18);
+    border-color: rgba(47, 129, 247, 0.5);
+}
+.toggle-switch.on::after {
+    left: 20px;
+    background: var(--accent);
+}
+.toggle-switch:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.error-text {
+    color: var(--danger);
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
+
+.help-btn.has-error {
+    border-color: rgba(239, 68, 68, 0.65);
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12);
+    color: var(--danger);
+}
+
+.subtab-bar .settings-subtab-button.invalid:not(.active) {
+    background: rgba(239, 68, 68, 0.10);
+    color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.28);
+}
+
+/* ====================================================
+   Программы
+   ==================================================== */
+.programs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+.program-card {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.program-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.program-card-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+}
+.program-card-actions button {
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+}
+
+/* ====================================================
+   Редактор программ (шаги)
+   ==================================================== */
+.step-card {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 10px;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow);
+    display: flex;
+    gap: 12px;
+    position: relative;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+.step-action-row {
+    width: 100%;
+    margin-left: 30px; /* aligns with params (accounts for .step-number) */
+    margin-bottom: 4px;
+}
+.step-action-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    line-height: 1.25;
+}
+.step-number {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+}
+.step-params {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-left: 30px;
+}
+.step-param-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    flex-wrap: wrap;
+}
+.step-param-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0;
+    width: 120px;
+    flex: 0 0 120px;
+    line-height: 1.2;
+}
+.step-param-group .form-control {
+    width: 100%;
+    height: 28px;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.75rem;
+}
+.step-param-group .control-row {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.step-param-group .help-inline-wrap {
+    width: 100%;
+    flex: 0 0 100%;
+    /* Full-width inline popover (like Settings) */
+    padding-left: 0;
+}
+.step-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: flex-start;
+}
+.step-controls.step-controls-bottom {
+    margin-left: 30px;
+    flex-direction: row;
+    width: 100%;
+    justify-content: flex-end;
+}
+.step-controls button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.step-controls button:hover {
+    background: rgba(47, 129, 247, 0.10);
+}
+.step-controls button.danger {
+    background: var(--danger);
+    color: #111827;
+    border: none;
+}
+.step-controls button.danger:hover {
+    background: rgba(251, 113, 133, 0.85);
+}
+
+/* Улучшение селектов в редакторе программ */
+#actionSelect {
+    font-size: 0.9rem;
+    padding: 8px;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+/* Адаптация для мобильных в редакторе */
+@media (max-width: 400px) {
+    .step-params {
+        flex-direction: column;
+        margin-left: 0;
+        margin-top: 20px;
+    }
+    .step-param-group {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+    .step-param-label {
+        width: auto;
+        flex: 0 0 auto;
+    }
+    .step-param-group .help-inline-wrap {
+        padding-left: 0;
+    }
+    .step-controls {
+        flex-direction: row;
+        justify-content: flex-end;
+        margin-top: 8px;
+    }
+    .step-action-row {
+        margin-left: 0;
+    }
+    .step-controls.step-controls-bottom {
+        margin-left: 0;
+    }
+    .step-number {
+        top: 4px;
+        left: 4px;
+    }
+}
+
+/* ====================================================
+   Конфигурационные блоки (входы, триггеры, датчики)
+   ==================================================== */
+.input-config-item,
+.trigger-item,
+.temp-trigger-item,
+.sensor-config-item {
+    background: var(--bg-primary);
+    border-radius: var(--radius-1);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--border);
+}
+.input-config-item h4,
+.trigger-header h4,
+.temp-trigger-item h4,
+.sensor-config-item h4 {
+    margin-bottom: 8px;
+    color: var(--accent);
+    font-size: 0.95rem;
+}
+.trigger-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.trigger-header h4 {
+    margin: 0;
+}
+button.trigger-delete {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    padding: 0;
+    border-radius: 8px;
+    background: var(--danger);
+    color: #111827;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+button.trigger-delete:hover {
+    background: rgba(251, 113, 133, 0.85);
+}
+
+/* ====================================================
+   OTA Progress Bar
+   ==================================================== */
+.ota-progress {
+    margin: 10px 0;
+}
+.progress-text {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+}
+.progress-bar {
+    height: 20px;
+    background: var(--border-soft);
+    border-radius: 10px;
+    margin-top: 5px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 10px;
+    width: 0%;
+    transition: width 0.2s ease;
+}
+.progress-status {
+    margin-top: 5px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* ====================================================
+   Логи
+   ==================================================== */
+#logsDisplay {
+    background: #0a1020;
+    color: var(--text-secondary);
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    height: 300px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.2;
+}
+
+/* ====================================================
+   Уведомления (тосты)
+   ==================================================== */
+.toast {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    width: calc(100% - 24px);
+    max-width: 520px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    color: var(--text-primary);
+    background: var(--bg-card);
+    user-select: none;
+    pointer-events: none; /* не перекрываем интерактивные элементы */
+}
+.toast-success { border-color: rgba(52, 211, 153, 0.45); }
+.toast-error { border-color: rgba(251, 113, 133, 0.55); }
+.toast-warning { border-color: rgba(251, 191, 36, 0.55); }
+.toast-info { border-color: rgba(47, 129, 247, 0.55); }
+
+/* Вариант тоста: выезд справа снизу (над таб-баром) */
+.toast.toast-side {
+    top: auto;
+    left: auto;
+    right: 12px;
+    bottom: 72px; /* над нижними вкладками */
+    width: min(420px, calc(100% - 24px));
+    max-width: 420px;
+    transform: translateX(120%);
+}
+.toast-enter { transition: transform 0.22s ease, opacity 0.22s ease; }
+.toast-enter-start { transform: translateX(120%); opacity: 0; }
+.toast-enter-end { transform: translateX(0); opacity: 1; }
+.toast-leave { transition: transform 0.18s ease, opacity 0.18s ease; }
+.toast-leave-start { transform: translateX(0); opacity: 1; }
+.toast-leave-end { transform: translateX(120%); opacity: 0; }
+
+/* ====================================================
+   Модальные окна
+   ==================================================== */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0,0,0,0.55);
+}
+.modal-card {
+    width: 100%;
+    max-width: 520px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 16px;
+}
+.modal-title {
+    font-size: 1rem;
+    font-weight: 650;
+    margin: 0 0 8px;
+}
+.modal-message {
+    margin: 0 0 14px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.modal-actions > .btn {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* ====================================================
+   Save hints / dirty markers
+   ==================================================== */
+.save-hint-row {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.hint {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.hint-danger {
+    color: var(--danger);
+}
+.hint::before {
+    content: "• ";
+    opacity: 0.9;
+}
+.hint-danger::before {
+    content: "• ";
+}
+
+button.link {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    font-weight: 650;
+    cursor: pointer;
+    text-align: left;
+}
+button.link:focus {
+    outline: none;
+    box-shadow: var(--ring);
+    border-radius: 8px;
+}
+
+/* ====================================================
+   Анимация спиннера
+   ==================================================== */
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+.h-4 { height: 1rem; }
+.w-4 { width: 1rem; }
+.inline { display: inline-block; }
+.ml-1 { margin-left: 0.25rem; }
+.opacity-25 { opacity: 0.25; }
+.opacity-75 { opacity: 0.75; }
+
+/* ====================================================
+   Утилиты (flex, отступы)
+   ==================================================== */
+/* legacy utility classes removed (replaced by component styles) */
+
+/* ====================================================
+   Адаптивность для мобильных
+   ==================================================== */
+@media (max-width: 400px) {
+    .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .status-strip {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    main {
+        padding: var(--space-3);
+    }
+    .card {
+        padding: 14px;
+        margin-bottom: var(--space-3);
+    }
+    .button-group {
+        flex-direction: column;
+    }
+    .btn {
+        width: 100%;
+    }
+    .subtab-bar .settings-subtab-button {
+        min-width: 60px;
+        font-size: 0.75rem;
+    }
+    .panel-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    /* Bottom tab bar: allow wrapping on very narrow screens */
+    .tab-bar {
+        flex-wrap: wrap;
+    }
+    .tab-button {
+        flex: 1 1 calc(50% - var(--space-1));
+    }
+}
+
+/* legacy .alert styles removed in favor of .notice */

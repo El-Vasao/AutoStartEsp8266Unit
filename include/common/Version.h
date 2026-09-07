@@ -1,0 +1,6 @@
+// Auto-generated
+#pragma once
+#define SERIAL_DEBUG 1
+#define FIRMWARE_VERSION_NUM 1788821029ULL
+#define FIRMWARE_VERSION_STR "1788821029"
+#define FIRMWARE_BUILD_TYPE "debug"

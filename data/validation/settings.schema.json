@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autostart.local/schemas/settings.schema.json",
+  "title": "AutoStart settings (frontend validation)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "setup_required": { "type": "boolean" },
+    "wifi": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ssid": { "type": "string", "maxLength": 32 },
+        "password": { "type": "string", "maxLength": 63 },
+        "ap_timeout_enabled": { "type": "boolean" },
+        "ap_timeout_sec": { "type": "integer", "minimum": 0, "maximum": 99999 }
+      }
+    },
+    "gsm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apn": { "type": "string", "maxLength": 32 },
+        "apn_user": { "type": "string", "maxLength": 32 },
+        "apn_pass": { "type": "string", "maxLength": 32 },
+        "owner_phone": { "type": "string", "maxLength": 19, "pattern": "^(?:\\s*|\\+\\d{7,15})$" },
+        "dtmf_password": { "type": "string", "maxLength": 8, "pattern": "^(?:\\s*|\\d{3,8})$" }
+      }
+    },
+    "mqtt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "broker": { "type": "string", "maxLength": 63 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "client_id": { "type": "string", "maxLength": 32 },
+        "user": { "type": "string", "maxLength": 32 },
+        "pass": { "type": "string", "maxLength": 32 },
+        "status_topic": { "type": "string", "maxLength": 64 },
+        "cmd_topic": { "type": "string", "maxLength": 64 },
+        "publish_interval_sec": { "type": "integer", "minimum": 1, "maximum": 3600 }
+      }
+    },
+    "vehicle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adc_voltage_coeff": { "type": "number", "minimum": 0 },
+        "starter_max_time_sec": { "type": "integer", "minimum": 1, "maximum": 9999 },
+        "wait_after_start_sec": { "type": "integer", "minimum": 0, "maximum": 99999 },
+        "engine_running_voltage_threshold": { "type": "number", "minimum": 0 },
+        "engine_stopped_voltage_threshold": { "type": "number", "minimum": 0 },
+        "starter_relay_id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "engine_detection_source": { "type": "string", "enum": ["voltage", "input"] },
+        "engine_input_id": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
+    },
+    "sensors": {
+      "type": "array",
+      "default": [],
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "rom": {
+            "type": "string",
+            "maxLength": 23,
+            "pattern": "^(?:\\s*|[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){7})$"
+          },
+          "name": { "type": "string", "maxLength": 15 },
+          "coeff": { "type": "number" }
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "default": [],
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "enabled": { "type": "boolean" },
+          "name": { "type": "string", "maxLength": 15 },
+          "type": { "type": "integer", "enum": [0, 1] },
+          "active_state": { "type": "boolean" },
+          "pulse": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pulses_per_rev": { "type": "integer", "minimum": 1, "maximum": 9999999 },
+              "threshold_rpm": { "type": "integer", "minimum": 0, "maximum": 9999999 }
+            }
+          }
+        }
+      }
+    },
+    "input_triggers": {
+      "type": "array",
+      "default": [],
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "enabled": { "type": "boolean" },
+          "input_id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "trigger_level": { "type": "integer", "enum": [0, 1] },
+          "program_id": { "type": "integer", "minimum": 0, "maximum": 255 }
+        }
+      }
+    },
+    "temperature_triggers": {
+      "type": "array",
+      "default": [],
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "enabled": { "type": "boolean" },
+          "sensor_id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "sensor_name": { "type": "string", "maxLength": 15 },
+          "comparison": { "type": "string", "enum": ["above", "below"] },
+          "threshold": { "type": "number" },
+          "program_id": { "type": "integer", "minimum": 0, "maximum": 255 }
+        }
+      }
+    },
+    "thermostat": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sensor_id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "sensor_name": { "type": "string", "maxLength": 15 },
+        "comparison": { "type": "string", "enum": ["above", "below"] },
+        "lower_threshold": { "type": "number" },
+        "upper_threshold": { "type": "number" },
+        "program_id_lower": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "program_id_upper": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    },
+    "battery_saver": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "voltage_start_threshold": { "type": "number", "minimum": 0 },
+        "voltage_abort_threshold": { "type": "number", "minimum": 0 },
+        "hysteresis": { "type": "number", "minimum": 0 },
+        "min_low_voltage_duration_sec": { "type": "integer", "minimum": 0, "maximum": 86400 },
+        "min_time_between_attempts_sec": { "type": "integer", "minimum": 0, "maximum": 86400 },
+        "max_attempts_per_day": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "program_id": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    }
+  }
+}

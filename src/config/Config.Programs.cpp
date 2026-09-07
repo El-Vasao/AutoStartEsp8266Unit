@@ -1,0 +1,142 @@
+#include "config/Config.h"
+#include "fs/FSManager.h"
+#include "common/Logger.h"
+#include "common/Utils.h"
+#include "config/internal/ProgramJsonIo.h"
+#include "config/internal/ConfigStorageInternal.h"
+
+#include <ESP8266WiFi.h>
+
+#include <stdlib.h>
+
+using namespace config_storage_internal;
+
+namespace {
+
+size_t encodeProgramSave(Print& p, void* ctx) {
+    const auto* prog = reinterpret_cast<const Program*>(ctx);
+    return program_json::emitProgramToPrint(*prog, p);
+}
+
+} // namespace
+
+bool Config::loadProgramCompiled(uint8_t id, CompiledStep* outSteps, uint8_t maxSteps, uint8_t* outCount,
+                                 char* outName, size_t outNameSize) {
+    if (!outSteps || maxSteps == 0 || !outCount || !outName || outNameSize == 0) return false;
+
+    char path[BufferBytes::Fs::PROGRAM_PATH];
+    snprintf(path, sizeof(path), "/programs/%u.json", id);
+
+    File f = fileSystem.openRead(path);
+    if (!f) {
+        logger.log("[Config] Failed to read program %u\n", id);
+        return false;
+    }
+
+    outName[0] = '\0';
+    *outCount = 0;
+    const bool ok = program_json::parseProgramCompiledFile(f, id, outSteps, maxSteps, outCount, outName, outNameSize);
+    f.close();
+    return ok;
+}
+
+bool Config::programExists(uint8_t id) {
+    char path[BufferBytes::Fs::PROGRAM_PATH];
+    snprintf(path, sizeof(path), "/programs/%u.json", id);
+    return fileSystem.exists(path);
+}
+
+bool Config::isProgramUsed(uint8_t id) const {
+    if (!loaded) return false;
+    for (uint8_t i = 0; i < baseCache.input_triggers_count; i++) {
+        if (baseCache.input_triggers[i].enabled && baseCache.input_triggers[i].program_id == id) return true;
+    }
+    for (uint8_t i = 0; i < baseCache.temperature_triggers_count; i++) {
+        if (baseCache.temperature_triggers[i].enabled && baseCache.temperature_triggers[i].program_id == id) return true;
+    }
+    if (baseCache.thermostat.enabled) {
+        if (baseCache.thermostat.program_id_lower == id || baseCache.thermostat.program_id_upper == id) return true;
+    }
+    if (baseCache.battery_saver.enabled && baseCache.battery_saver.program_id == id) return true;
+    return false;
+}
+
+bool Config::writeProgramFile(const Program& prog) {
+    char path[BufferBytes::Fs::PROGRAM_PATH];
+    snprintf(path, sizeof(path), "/programs/%u.json", prog.id);
+
+    if (!ensureProgramsDir()) return false;
+
+    prepareFlashWriteLogGcAndWdt();
+
+    wdtPort_.feedNow();
+    ESP.wdtFeed();
+
+    if (!fileSystem.writeJsonAtomicStream(path, encodeProgramSave, const_cast<Program*>(&prog), Limits::CONFIG_JSON_SIZE)) {
+        logger.log("[Config] Failed to write program file\n");
+        return false;
+    }
+
+    logger.log("[Config] Program %u file written\n", prog.id);
+    return true;
+}
+
+bool Config::saveProgram(const Program& prog) {
+    if (!writeProgramFile(prog)) return false;
+    wdtPort_.feedNow();
+    ESP.wdtFeed();
+    if (!rebuildProgramIndex()) {
+        logger.log("[Config] Program file saved but index rebuild failed!\n");
+        return false;
+    }
+    logger.log("[Config] Program %u saved\n", prog.id);
+    return true;
+}
+
+bool Config::deleteProgram(uint8_t id) {
+    if (isProgramUsed(id)) {
+        logger.log("[Config] Program %u is in use, cannot delete\n", id);
+        return false;
+    }
+
+    char path[BufferBytes::Fs::PROGRAM_PATH];
+    snprintf(path, sizeof(path), "/programs/%u.json", id);
+    if (!fileSystem.deleteFile(path)) return false;
+
+    if (!rebuildProgramIndex()) {
+        logger.log("[Config] Program %u file removed but index rebuild failed\n", id);
+        return false;
+    }
+    logger.log("[Config] Program %u deleted\n", id);
+    return true;
+}
+
+bool Config::resetPrograms() {
+    logger.log("[Config] resetPrograms: start\n");
+    if (!ensureProgramsDir()) return false;
+
+    bool ok = true;
+    Dir dir = fileSystem.openDir("/programs");
+    while (dir.next()) {
+        wdtPort_.feedNow();
+        wdtPort_.feedNow();
+        const String& fn = dir.fileName();
+        const char* fns = fn.c_str();
+        size_t n = fn.length();
+        if (n < 6) continue;
+        if (strcmp(fns + (n - 5), ".json") != 0) continue;
+        if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) continue;
+        if (strcmp(fns, "index.json") == 0) continue;
+        File xf = dir.openFile("r");
+        if (xf) xf.close();
+
+        if (!fileSystem.deleteFile(fns)) {
+            ok = false;
+        }
+    }
+
+    if (!rebuildProgramIndex()) ok = false;
+
+    logger.log("[Config] resetPrograms: %s\n", ok ? "OK" : "FAILED");
+    return ok;
+}
