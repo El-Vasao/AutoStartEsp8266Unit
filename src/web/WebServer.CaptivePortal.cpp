@@ -20,11 +20,13 @@ void WebServer::setupCaptivePortalRoutes_() {
             const char* contentType = contentTypeByPath(urlBuf);
 
             if (urlEndsWith(urlBuf, ".json")) {
+                webServer.noteHeavyUiTraffic();
                 sendJsonFromFs(request, urlBuf, "no-cache, no-store, must-revalidate");
                 return;
             }
 
             if (fileSystem.exists(urlBuf)) {
+                webServer.noteHeavyUiTraffic();
                 auto* resp = request->beginResponse(fileSystem.webFs(), urlBuf, contentType);
                 addSessionRevalidateHeaders(resp, etag);
                 request->send(resp);
@@ -35,6 +37,7 @@ void WebServer::setupCaptivePortalRoutes_() {
                 char gzPath[BufferBytes::Fs::GZIP_PATH];
                 snprintf(gzPath, sizeof(gzPath), "%s.gz", urlBuf);
                 if (fileSystem.exists(gzPath)) {
+                    webServer.noteHeavyUiTraffic();
                     auto* resp = request->beginResponse(fileSystem.webFs(), gzPath, contentType);
                     resp->addHeader("Content-Encoding", "gzip");
                     resp->addHeader("Vary", "Accept-Encoding");
@@ -42,7 +45,19 @@ void WebServer::setupCaptivePortalRoutes_() {
                     request->send(resp);
                     return;
                 }
+                // Missing static assets must 404 (not captive-redirect to HTML as JS body).
+                if (urlEndsWith(urlBuf, ".js") || urlEndsWith(urlBuf, ".css")) {
+                    request->send(404, "text/plain", "Not Found");
+                    return;
+                }
             }
+        }
+
+        // Path-only .js/.css outside the block above (trailing slash / short paths)
+        if (request->method() == HTTP_GET &&
+            (urlEndsWith(urlBuf, ".js") || urlEndsWith(urlBuf, ".css"))) {
+            request->send(404, "text/plain", "Not Found");
+            return;
         }
 
         request->redirect("/");

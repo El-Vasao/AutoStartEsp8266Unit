@@ -43,11 +43,155 @@
       .header-toast-card.warning {
         border-color: rgba(251, 191, 36, 0.55);
       }
+      /* Pre-Alpine boot splash (avoids blank white while SoftAP delivers /app.bundle.js) */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        background: rgba(11, 18, 32, 0.92);
+        color: #e6edf3;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      #boot-splash .boot-card {
+        width: min(520px, calc(100% - 24px));
+        background: rgba(17, 26, 46, 0.96);
+        border: 1px solid rgba(34, 48, 85, 0.85);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+        border-radius: 14px;
+        padding: 18px 16px;
+        text-align: center;
+      }
+      #boot-splash .boot-title { font-size: 1.15rem; font-weight: 600; margin: 0 0 6px; }
+      #boot-splash .boot-sub { opacity: 0.85; font-size: 0.95rem; margin: 0 0 12px; line-height: 1.35; }
+      #boot-splash .boot-pct { font-size: 0.9rem; margin-bottom: 6px; opacity: 0.9; }
+      #boot-splash .boot-bar {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(34, 48, 85, 0.9);
+        overflow: hidden;
+      }
+      #boot-splash .boot-fill {
+        height: 100%;
+        width: 0%;
+        background: #3b82f6;
+        border-radius: 999px;
+        transition: width 0.2s ease;
+      }
     </style>
+    <script>try { document.documentElement.classList.add('ui-booting'); } catch (e) {}</script>
     <!-- INJECT_APP_CSS -->
-    <!-- INJECT_APP_JS -->
+    <!-- App JS is loaded at end of body (/app.bundle.js) so SoftAP can deliver all tab
+         markup before the large script; a head-inlined bundle put tabs in the last ~12%. -->
+    <script>
+    (function () {
+      // SoftAP F5: keep uiSessionId in sessionStorage and reuse it (do not beacon-close).
+      // Closing+reopening session races the single SSE slot and leaves the first F5 stuck locked.
+
+      var REQUIRED_TABS = ['tab-panel', 'tab-programs', 'tab-settings', 'tab-system'];
+      var alpineOk = false;
+      var watchdogTimer = null;
+      var ALPINE_WATCHDOG_MS = 12000;
+
+      function setSplashLabel(text) {
+        try {
+          var sub = document.querySelector('#boot-splash [data-boot-label]');
+          if (sub && text) sub.textContent = String(text);
+        } catch (e) {}
+      }
+
+      function docIncomplete() {
+        if (!document.getElementById('ui-doc-complete')) return true;
+        for (var i = 0; i < REQUIRED_TABS.length; i++) {
+          if (!document.getElementById(REQUIRED_TABS[i])) return true;
+        }
+        return false;
+      }
+      function bustReload() {
+        try {
+          var n = parseInt(sessionStorage.getItem('uiDeliveryReload') || '0', 10) || 0;
+          if (n >= 4) {
+            setSplashLabel('Не удалось загрузить UI. Обновите страницу.');
+            return;
+          }
+          sessionStorage.setItem('uiDeliveryReload', String(n + 1));
+        } catch (e) {}
+        location.replace(location.pathname + '?_=' + Date.now());
+      }
+      function clearWatchdog() {
+        if (watchdogTimer) {
+          clearTimeout(watchdogTimer);
+          watchdogTimer = null;
+        }
+      }
+      function armAlpineWatchdog(attempt) {
+        clearWatchdog();
+        watchdogTimer = setTimeout(function () {
+          if (alpineOk) return;
+          // Truncated/corrupt JS often fires onload without Alpine.start — never stay white.
+          setSplashLabel('Повтор загрузки…');
+          if (attempt < 6) bustReload();
+          else bustReload();
+        }, ALPINE_WATCHDOG_MS);
+      }
+      function loadBundle(attempt) {
+        setSplashLabel(attempt > 1 ? ('Повтор загрузки (' + attempt + ')…') : 'Загрузка приложения…');
+        var s = document.createElement('script');
+        s.src = '/app.bundle.js?a=' + attempt + '&t=' + Date.now();
+        // Do NOT treat script.onload as success — SoftAP may return HTML/truncated JS with 200.
+        s.onload = function () {
+          armAlpineWatchdog(attempt);
+        };
+        s.onerror = function () {
+          clearWatchdog();
+          if (attempt < 6) {
+            setSplashLabel('Повтор…');
+            setTimeout(function () { loadBundle(attempt + 1); }, 350 * attempt);
+          } else {
+            bustReload();
+          }
+        };
+        document.head.appendChild(s);
+        armAlpineWatchdog(attempt);
+      }
+
+      document.addEventListener('alpine:initialized', function () {
+        alpineOk = true;
+        clearWatchdog();
+        try { sessionStorage.removeItem('uiDeliveryReload'); } catch (e) {}
+        setSplashLabel('Инициализация…');
+      });
+
+      document.addEventListener('DOMContentLoaded', function () {
+        if (docIncomplete()) {
+          setSplashLabel('Неполная страница, перезагрузка…');
+          bustReload();
+          return;
+        }
+        loadBundle(1);
+      });
+      // SoftAP / bfcache: after restore always treat as fresh navigation to panel via full load.
+      window.addEventListener('pageshow', function (ev) {
+        if (ev && ev.persisted) {
+          try { location.replace('/?_=' + Date.now()); } catch (e) { location.reload(); }
+        }
+      });
+    })();
+    </script>
 </head>
 <body>
+    <!-- Static splash outside x-cloak: visible before Alpine /app.bundle.js -->
+    <div id="boot-splash" role="status" aria-live="polite" aria-busy="true">
+      <div class="boot-card">
+        <div class="boot-title">Загрузка…</div>
+        <div class="boot-sub" data-boot-label>Подготовка UI…</div>
+        <div class="boot-pct" data-boot-pct>0%</div>
+        <div class="boot-bar"><div class="boot-fill" data-boot-fill style="width:0%"></div></div>
+      </div>
+    </div>
     <!--
       UI structure (high level):
       - busy modal (flash commit / blocking ops)
@@ -62,28 +206,32 @@
           - system: info + actions + OTA + logs
     -->
     <!-- Блокирующая модалка (без закрытия/скипа): запись во flash и т.п. -->
-    <div
-        x-data
-        x-show="$store.uiBusy.open"
-        x-cloak
-        class="modal-backdrop z-60"
-        x-trap.inert.noscroll.noautofocus="$store.uiBusy.open"
-        role="dialog"
-        aria-modal="true"
-    >
-        <div class="modal-card modal-card--sm" tabindex="0">
-            <h3 class="modal-title" x-text="$store.uiBusy.title"></h3>
-            <p class="modal-message" x-text="$store.uiBusy.message"></p>
-            <div class="modal-actions">
-                <button class="btn" type="button" x-show="!$store.uiBusy.okMode" disabled aria-disabled="true">
-                    Подождите… <span x-html="$store.uiFormat.spinnerSvg"></span>
-                </button>
-                <button class="btn primary" type="button" x-show="$store.uiBusy.okMode" @click="$store.uiBusy.ok()">
-                    <span x-text="$store.uiBusy.okLabel || 'OK'"></span>
-                </button>
+        <div
+            x-data
+            x-show="$store.uiBusy.open"
+            x-cloak
+            class="modal-backdrop z-60"
+            x-trap.inert.noscroll.noautofocus="$store.uiBusy.open"
+            role="dialog"
+            aria-modal="true"
+        >
+            <div class="modal-card modal-card--sm" tabindex="0">
+                <h3 class="modal-title" x-text="$store.uiBusy.title"></h3>
+                <p class="modal-message" x-text="$store.uiBusy.message"></p>
+                <div class="ui-progress" x-show="$store.uiBusy.progress != null">
+                    <div class="progress-text" x-text="Math.round($store.uiBusy.progress || 0) + '%'"></div>
+                    <div class="progress-bar"><div class="progress-fill" :style="{ width: ($store.uiBusy.progress || 0) + '%' }"></div></div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" type="button" x-show="!$store.uiBusy.okMode" disabled aria-disabled="true">
+                        Подождите… <span x-html="$store.uiFormat.spinnerSvg"></span>
+                    </button>
+                    <button class="btn primary" type="button" x-show="$store.uiBusy.okMode" @click="$store.uiBusy.ok()">
+                        <span x-text="$store.uiBusy.okLabel || 'OK'"></span>
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
 
     <!-- Модальные подтверждения (перезагрузка, удаление и т.д.) -->
     <div
@@ -107,20 +255,25 @@
     </div>
 
     <div class="container" x-data="app" x-cloak :class="{ 'ui-locked': $store.uiState.locked, 'unsaved-hint': $store.uiState.unsavedHint }">
-        <div class="init-backdrop" x-show="$store.uiState.locked" x-cloak aria-live="polite" aria-busy="true">
+        <!-- Fallback if boot-splash already dismissed; primary boot UI is #boot-splash until unlock/failInit -->
+        <div class="init-backdrop" x-show="$store.uiState.initLock && !$store.uiBusy.open" x-cloak aria-live="polite" aria-busy="true">
             <div class="init-card">
                 <div class="init-title">Загрузка…</div>
-                <div class="init-sub">Подгружаем настройки и константы</div>
+                <div class="init-sub" x-text="$store.uiState.initProgressLabel || ($store.uiState.initPhase === 'sse' ? 'Ждём статус устройства…' : 'Загрузка по шагам…')"></div>
+                <div class="ui-progress">
+                    <div class="progress-text" x-text="($store.uiState.initProgress || 0) + '%'"></div>
+                    <div class="progress-bar"><div class="progress-fill" :style="{ width: ($store.uiState.initProgress || 0) + '%' }"></div></div>
+                </div>
             </div>
         </div>
-        <div class="init-backdrop" x-show="!$store.uiState.locked && $store.uiState.initFailed" x-cloak aria-live="polite" aria-busy="false">
+        <div class="init-backdrop" x-show="!$store.uiState.initLock && $store.uiState.initFailed && activeTab !== 'system'" x-cloak aria-live="polite" aria-busy="false">
             <div class="init-card">
                 <div class="init-title">Аварийный режим</div>
                 <div class="init-sub" x-text="$store.uiState.initError || 'Не удалось загрузить данные для UI.'"></div>
                 <div class="modal-actions" style="margin-top:10px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                     <button class="btn warning" type="button" @click="$store.deviceMaintenance.performReboot()">Перезагрузить устройство</button>
-                    <button class="btn" type="button" @click="$store.uiState.activeTab = 'system'">Прошивка / OTA</button>
-                    <button class="btn" type="button" @click="location.reload()">Обновить страницу</button>
+                    <button class="btn" type="button" @click="switchTab('system')">Прошивка / OTA</button>
+                    <button class="btn" type="button" @click="location.replace('/?_=' + Date.now())">Обновить страницу</button>
                 </div>
             </div>
         </div>
@@ -154,8 +307,7 @@
                     <!-- Датчики -->
                     <div class="card">
                         <h3>Датчики</h3>
-                        <template x-if="$store.deviceStatus.loaded">
-                            <div class="tile-grid">
+                        <div class="tile-grid" x-show="$store.deviceStatus.loaded">
                                 <template x-for="(s, index) in $store.deviceStatus.tempSensors" :key="index">
                                     <div
                                         class="tile"
@@ -169,18 +321,14 @@
                                     </div>
                                 </template>
                                 <div class="tile empty" x-show="!$store.deviceStatus.hasValidTemps">Нет данных</div>
-                            </div>
-                        </template>
-                        <template x-if="!$store.deviceStatus.loaded">
-                            <div class="loading-placeholder">Загрузка данных...</div>
-                        </template>
+                        </div>
+                        <div class="loading-placeholder" x-show="!$store.deviceStatus.loaded">Загрузка данных...</div>
                     </div>
 
                     <!-- Входы -->
                     <div class="card">
                         <h3>Входы</h3>
-                        <template x-if="$store.deviceStatus.loaded">
-                            <div class="tile-grid">
+                        <div class="tile-grid" x-show="$store.deviceStatus.loaded">
                                 <template x-for="(input, index) in $store.deviceStatus.inputs" :key="index">
                                     <div
                                         class="tile"
@@ -192,30 +340,23 @@
                                         <div class="tile-sub" x-show="$store.uiFormat.isCounter(index)" x-text="$store.uiFormat.getFrequency(index) + ' rpm'"></div>
                                     </div>
                                 </template>
-                            </div>
-                        </template>
-                        <template x-if="!$store.deviceStatus.loaded">
-                            <div class="loading-placeholder">Загрузка данных...</div>
-                        </template>
+                        </div>
+                        <div class="loading-placeholder" x-show="!$store.deviceStatus.loaded">Загрузка данных...</div>
                     </div>
                 </div>
 
                 <!-- Реле -->
                 <div class="card">
                     <h3>Реле</h3>
-                    <template x-if="$store.deviceStatus.loaded">
-                        <div class="tile-grid">
+                    <div class="tile-grid" x-show="$store.deviceStatus.loaded">
                             <template x-for="(state, index) in $store.deviceStatus.relays" :key="index">
                                 <div class="tile relay-tile" :class="state ? 'relay-on' : 'relay-off'">
                                     <div class="tile-name" x-text="'K' + (index+1)"></div>
                                     <div class="tile-sub" x-text="state ? 'ON' : 'OFF'"></div>
                                 </div>
                             </template>
-                        </div>
-                    </template>
-                    <template x-if="!$store.deviceStatus.loaded">
-                        <div class="loading-placeholder">Загрузка данных...</div>
-                    </template>
+                    </div>
+                    <div class="loading-placeholder" x-show="!$store.deviceStatus.loaded">Загрузка данных...</div>
                 </div>
 
                 <!-- Триггеры на входах -->
@@ -257,8 +398,7 @@
                 <!-- Функции (Battery Saver и Термостат) -->
                 <div class="card">
                     <h3>Функции</h3>
-                    <template x-if="$store.deviceStatus.loaded">
-                        <div class="tile-grid-wide">
+                    <div class="tile-grid-wide" x-show="$store.deviceStatus.loaded">
                             <!-- Battery Saver -->
                             <div
                                 class="tile tile-wide"
@@ -285,18 +425,14 @@
                                 </div>
                                 <div class="tile-sub" x-text="'Программы: ↓' + ($store.settings.thermostat.program_id_lower || '—') + ' ↑' + ($store.settings.thermostat.program_id_upper || '—')"></div>
                             </div>
-                        </div>
-                    </template>
-                    <template x-if="!$store.deviceStatus.loaded">
-                        <div class="loading-placeholder">Загрузка данных...</div>
-                    </template>
+                    </div>
+                    <div class="loading-placeholder" x-show="!$store.deviceStatus.loaded">Загрузка данных...</div>
                 </div>
 
                 <!-- Общая информация (объединённая карточка) -->
                 <div class="card">
                     <h3>Общая информация</h3>
-                    <template x-if="$store.deviceStatus.loaded">
-                        <div>
+                    <div x-show="$store.deviceStatus.loaded">
                             <div class="info-row">
                                 <span class="info-label">Двигатель:</span>
                                 <span class="info-value" x-text="$store.deviceStatus.engineRunning ? 'Работает' : 'Заглушен'"></span>
@@ -321,11 +457,8 @@
                                 <span class="info-label">Последняя программа:</span>
                                 <span class="info-value" x-text="$store.deviceStatus.lastProgramName || '—'"></span>
                             </div>
-                        </div>
-                    </template>
-                    <template x-if="!$store.deviceStatus.loaded">
-                        <div class="loading-placeholder">Загрузка данных...</div>
-                    </template>
+                    </div>
+                    <div class="loading-placeholder" x-show="!$store.deviceStatus.loaded">Загрузка данных...</div>
                 </div>
             </div>
 
@@ -525,7 +658,7 @@
                     <div>
                         <!-- Универсальный рендерер "простых" табов по schema.fields -->
                         <template x-for="tabKey in ['wifi','gsm','mqtt','vehicle','thermostat','battery']" :key="tabKey">
-                            <div x-show="$store.uiState.activeSubTab === tabKey" :class="{ active: $store.uiState.activeSubTab === tabKey }" class="settings-subtab-pane">
+                            <div :class="{ active: $store.uiState.activeSubTab === tabKey }" class="settings-subtab-pane">
                                 <div class="card" :id="tabKey === 'thermostat' ? 'settings-thermostat' : (tabKey === 'battery' ? 'settings-battery' : null)">
                                     <template x-for="field in ($store.settingsUiSchema.settings?.[tabKey]?.fields || [])" :key="field.path">
                                         <div class="form-group" x-data="$store.settingsForm.fieldRow(field, field.path)" x-show="(!field.hidden) && (!field.showIf || field.showIf($store))">
@@ -616,9 +749,10 @@
                         </template>
 
                         <!-- Датчики -->
-                        <div x-show="$store.uiState.activeSubTab === 'sensors'" :class="{ active: $store.uiState.activeSubTab === 'sensors' }" class="settings-subtab-pane">
+                        <div :class="{ active: $store.uiState.activeSubTab === 'sensors' }" class="settings-subtab-pane">
                             <div class="card">
-                                <template x-for="i in (($store.deviceStatus.tempSensors?.length || 0))" :key="i">
+                                <p class="loading-placeholder" x-show="!($store.deviceStatus.sensorSlots > 0)">Нет датчиков</p>
+                                <template x-for="i in ($store.deviceStatus.sensorSlots || 0)" :key="i">
                                     <div class="sensor-config-item" :id="'settings-sensor-' + (i-1)">
                                         <h4 x-text="'Датчик ' + i"></h4>
                                         <template x-for="field in ($store.settingsUiSchema.settings?.sensors?.fields || [])" :key="field.key">
@@ -689,9 +823,10 @@
                         </div>
 
                         <!-- Входы -->
-                        <div x-show="$store.uiState.activeSubTab === 'inputs'" :class="{ active: $store.uiState.activeSubTab === 'inputs' }" class="settings-subtab-pane">
+                        <div :class="{ active: $store.uiState.activeSubTab === 'inputs' }" class="settings-subtab-pane">
                             <div class="card">
-                                <template x-for="i in (($store.deviceStatus.inputs?.length || 0))" :key="i">
+                                <p class="loading-placeholder" x-show="!($store.deviceStatus.inputSlots > 0)">Нет входов</p>
+                                <template x-for="i in ($store.deviceStatus.inputSlots || 0)" :key="i">
                                     <div class="input-config-item" :id="'settings-input-' + (i-1)">
                                         <h4 x-text="$store.uiFormat.inputName(i-1)"></h4>
                                         <template x-for="field in ($store.settingsUiSchema.settings?.inputs?.fields || [])" :key="field.pathTmpl + ':' + field.bind">
@@ -781,7 +916,7 @@
                         </div>
 
                         <!-- Триггеры -->
-                        <div x-show="$store.uiState.activeSubTab === 'triggers'" :class="{ active: $store.uiState.activeSubTab === 'triggers' }" class="settings-subtab-pane">
+                        <div :class="{ active: $store.uiState.activeSubTab === 'triggers' }" class="settings-subtab-pane">
                             <div class="card">
                                 <div id="settings-triggers-config">
                                     <template x-for="(trigger, idx) in $store.settings.input_triggers" :key="idx">
@@ -956,8 +1091,6 @@
 
             <!-- Система -->
             <div x-show="activeTab === 'system'" id="tab-system" class="tab-pane">
-                <template x-if="$store.deviceStatus.loaded">
-                    <div>
                         <div class="card">
                             <h3>Системная информация</h3>
                             <div class="info-row"><span class="info-label">Версия прошивки:</span> <span class="info-value" x-text="$store.deviceStatus.version || '—'"></span></div>
@@ -1016,13 +1149,9 @@
                                 x-intersect:leave="$store.uiLogs.setVisible(false)"
                             ></pre>
                         </div>
-                    </div>
-                </template>
-                <template x-if="!$store.deviceStatus.loaded">
-                    <div class="card">Загрузка системной информации...</div>
-                </template>
             </div>
         </main>
     </div>
+    <div id="ui-doc-complete" hidden aria-hidden="true"></div>
 </body>
 </html>

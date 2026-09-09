@@ -105,6 +105,11 @@ MQTT — это часть рантайм-коммуникаций и чувст
 
 - `NORMAL` / `NORMAL_SILENT`:
   - GSM/MQTT обслуживаются штатно, SSE incremental работает в обычных порогах очереди.
+  - Исключение в `NORMAL` при SoftAP UI init: STA associate и тяжёлый HTTP (не SSE connect) →
+    `noteHeavyUiTraffic` (немедленный cellular suspend). FE после checklist +
+    `CELLULAR_AFTER_UI_QUIET_MS` шлёт `POST /ui/ready` → `uiBrowserReady` → снова `service`.
+    Пока SoftAP без UI-storm (`lastHeavyUiMs==0`) MQTT на пустом AP допустим. SoftAP down —
+    clear marks; cellular не servится до silent / следующего цикла.
 - `pre-OTA` (окно `POST /upload` до фактического `switchMode(OTA_UPDATE)`):
   - активируется `otaUploadPressureActive`;
   - `CellularCore` временно приглушается (через `suspendCellularLink()` в handler NORMAL);

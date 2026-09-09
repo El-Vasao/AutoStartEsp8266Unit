@@ -8,8 +8,7 @@
  *
  * Инварианты по памяти:
  * - Не делать `String`-конкатенаций в циклах (на ESP8266 это быстро фрагментирует heap).
- * - Для JSON ответов использовать пуловые документы (`PoolManager::WebApi`), а сериализацию —
- *   через фиксированные буферы/stream только при необходимости (см. `web/internal/WebServerInternal.h`).
+ * - JSON body: `sendJsonStreaming` (count + filler), не `beginResponseStream`.
  *
  * Запрещено:
  * - Подключать внутренние заголовки web-подсистемы из других подсистем.
@@ -34,6 +33,71 @@ volatile bool gBootstrapLiteInFlight = false;
 volatile bool gBootstrapLiveInFlight = false;
 uint32_t gBootstrapLiveLastMs = 0;
 constexpr uint32_t kBootstrapLiveMinIntervalMs = 1200;
+
+void emitBootstrapLiteJson(Print& p) {
+    p.print("{\"version\":\"");
+    p.print(core.getVersionString());
+    p.print("\",\"uiLease\":{\"heartbeatMs\":");
+    p.print(WebUi::HEARTBEAT_INTERVAL_MS);
+    p.print(",\"sessionTimeoutMs\":");
+    p.print(WebUi::SESSION_TIMEOUT_MS);
+    p.print("},\"hwCounts\":{\"relays\":");
+    p.print(HardwareLimits::RELAYS);
+    p.print(",\"inputs\":");
+    p.print(HardwareLimits::INPUTS);
+    p.print(",\"sensors\":");
+    p.print(HardwareLimits::SENSORS);
+    p.print("},\"hwMap\":{\"inputs\":[");
+
+    for (uint8_t i = 0; i < HardwareLimits::INPUTS; i++) {
+        if (i) p.print(',');
+        p.print("{\"id\":");
+        p.print(Pin::INPUT_IDS[i]);
+        p.print(",\"label\":\"IN");
+        p.print(i + 1);
+        p.print("\"}");
+    }
+
+    p.print("],\"relays\":[");
+    for (uint8_t i = 0; i < HardwareLimits::RELAYS; i++) {
+        if (i) p.print(',');
+        p.print("{\"id\":");
+        p.print(Pin::RELAY_IDS[i]);
+        p.print(",\"label\":\"K");
+        p.print(i + 1);
+        p.print("\"}");
+    }
+
+    p.print("]},\"temperatureSensorRoms\":[");
+    const uint8_t n = core.getSensors().getSensorCount();
+    for (uint8_t i = 0; i < n; i++) {
+        if (i) p.print(',');
+        const uint8_t* addr = core.getSensors().getSensorAddress(i);
+        if (!addr) {
+            p.print("null");
+            continue;
+        }
+        char romStr[TextBytes::Sensors::ADDR_STRING];
+        snprintf(romStr, sizeof(romStr), "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
+                 addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7]);
+        p.print('\"');
+        p.print(romStr);
+        p.print('\"');
+    }
+    p.print("]}");
+}
+
+size_t fillBootstrapLiteJson(uint8_t* buffer, size_t maxLen, size_t index) {
+    SkippingPrint skip(index, buffer, maxLen);
+    emitBootstrapLiteJson(skip);
+    return skip.produced();
+}
+
+size_t fillBootstrapLiveJson(uint8_t* buffer, size_t maxLen, size_t index) {
+    SkippingPrint skip(index, buffer, maxLen);
+    WebServerRuntime::emitLiveSnapshotJson(skip);
+    return skip.produced();
+}
 } // namespace
 
 void WebServer::markOtaHttpUploadAwaitTimedOut() { gOtaHttpUploadAwaitTimedOut = true; }
@@ -58,11 +122,13 @@ static bool readIdEnabledBodyParams(AsyncWebServerRequest* request, uint32_t* id
 
 void WebServer::setupApiRoutes_() {
     server.on("/config/get", HTTP_GET, [](AsyncWebServerRequest* request) {
+        webServer.noteHeavyUiTraffic();
         if (rejectIfFlashBusy(request)) return;
         sendJsonFromFs(request, "/config.json", "no-cache, no-store, must-revalidate");
     });
 
     server.on("/bootstrap", HTTP_GET, [](AsyncWebServerRequest* request) {
+        webServer.noteHeavyUiTraffic();
         if (gBootstrapLiteInFlight) {
             request->send(429, kContentTypeJson, "{\"success\":false,\"error\":\"BOOTSTRAP_BUSY\"}");
             return;
@@ -78,65 +144,10 @@ void WebServer::setupApiRoutes_() {
             gBootstrapLiteInFlight = false;
             return;
         }
-        AsyncResponseStream* resp = request->beginResponseStream(kContentTypeJson);
-        if (!resp) {
-            request->send(500, kContentTypeText, "Out of memory");
+        if (!sendJsonStreaming(request, emitBootstrapLiteJson, fillBootstrapLiteJson)) {
             gBootstrapLiteInFlight = false;
             return;
         }
-        addNoCacheHeaders(resp);
-
-        resp->print("{\"version\":\"");
-        resp->print(core.getVersionString());
-        resp->print("\",\"uiLease\":{\"heartbeatMs\":");
-        resp->print(WebUi::HEARTBEAT_INTERVAL_MS);
-        resp->print(",\"sessionTimeoutMs\":");
-        resp->print(WebUi::SESSION_TIMEOUT_MS);
-        resp->print("},\"hwCounts\":{\"relays\":");
-        resp->print(HardwareLimits::RELAYS);
-        resp->print(",\"inputs\":");
-        resp->print(HardwareLimits::INPUTS);
-        resp->print(",\"sensors\":");
-        resp->print(HardwareLimits::SENSORS);
-        resp->print("},\"hwMap\":{\"inputs\":[");
-
-        for (uint8_t i = 0; i < HardwareLimits::INPUTS; i++) {
-            if (i) resp->print(',');
-            resp->print("{\"id\":");
-            resp->print(Pin::INPUT_IDS[i]);
-            resp->print(",\"label\":\"IN");
-            resp->print(i + 1);
-            resp->print("\"}");
-        }
-
-        resp->print("],\"relays\":[");
-        for (uint8_t i = 0; i < HardwareLimits::RELAYS; i++) {
-            if (i) resp->print(',');
-            resp->print("{\"id\":");
-            resp->print(Pin::RELAY_IDS[i]);
-            resp->print(",\"label\":\"K");
-            resp->print(i + 1);
-            resp->print("\"}");
-        }
-
-        resp->print("]},\"temperatureSensorRoms\":[");
-        const uint8_t n = core.getSensors().getSensorCount();
-        for (uint8_t i = 0; i < n; i++) {
-            if (i) resp->print(',');
-            const uint8_t* addr = core.getSensors().getSensorAddress(i);
-            if (!addr) {
-                resp->print("null");
-                continue;
-            }
-            char romStr[TextBytes::Sensors::ADDR_STRING];
-            snprintf(romStr, sizeof(romStr), "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
-                     addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7]);
-            resp->print('\"');
-            resp->print(romStr);
-            resp->print('\"');
-        }
-        resp->print("]}");
-        request->send(resp);
         logger.log("[WebServer] /bootstrap done in %lu ms (heap free=%u max=%u)\n",
                    (unsigned long)(millis() - startedAt),
                    (unsigned)ESP.getFreeHeap(),
@@ -145,6 +156,7 @@ void WebServer::setupApiRoutes_() {
     });
 
     server.on("/bootstrap/live", HTTP_GET, [](AsyncWebServerRequest* request) {
+        webServer.noteHeavyUiTraffic();
         const uint32_t now = millis();
         if ((now - gBootstrapLiveLastMs) < kBootstrapLiveMinIntervalMs) {
             request->send(429, kContentTypeJson, "{\"success\":false,\"error\":\"BOOTSTRAP_LIVE_COOLDOWN\"}");
@@ -169,15 +181,10 @@ void WebServer::setupApiRoutes_() {
             gBootstrapLiveInFlight = false;
             return;
         }
-        AsyncResponseStream* resp = request->beginResponseStream(kContentTypeJson);
-        if (!resp) {
-            request->send(500, kContentTypeText, "Out of memory");
+        if (!sendJsonStreaming(request, WebServerRuntime::emitLiveSnapshotJson, fillBootstrapLiveJson)) {
             gBootstrapLiveInFlight = false;
             return;
         }
-        addNoCacheHeaders(resp);
-        WebServerRuntime::emitLiveSnapshotJson(*resp);
-        request->send(resp);
         gBootstrapLiveLastMs = millis();
         logger.log("[WebServer] /bootstrap/live done in %lu ms (heap free=%u max=%u)\n",
                    (unsigned long)(millis() - startedAt),
@@ -202,7 +209,9 @@ void WebServer::setupApiRoutes_() {
         const uint16_t newCount = webServer.activeUiSessionCount();
 
         if (closing) {
-            logger.log("[WebServer] UI session closed: id=%lu\n", static_cast<unsigned long>(sessionId));
+            if (ok) {
+                logger.log("[WebServer] UI session closed: id=%lu\n", static_cast<unsigned long>(sessionId));
+            }
             if (ok && prevCount > 0 && newCount == 0) {
                 const size_t q = webServer.events.avgPacketsWaiting();
                 const uint16_t clients = webServer.refreshSseClientCount();
@@ -222,6 +231,21 @@ void WebServer::setupApiRoutes_() {
             return;
         }
 
+        sendJsonSuccess(request);
+    });
+
+    // FE checklist + settle: allow GSM/MQTT while SoftAP UI is up. Not a heavy mark.
+    server.on("/ui/ready", HTTP_POST, [](AsyncWebServerRequest* request) {
+        uint32_t sessionId = 0;
+        if (!parseUint32Param(request, "id", &sessionId) || sessionId == 0) {
+            request->send(400, kContentTypeJson, "{\"success\":false,\"error\":\"INVALID_SESSION_ID\"}");
+            return;
+        }
+        if (!webServer.touchUiSession(sessionId, millis())) {
+            request->send(503, kContentTypeJson, "{\"success\":false,\"error\":\"UI_SESSION_REQUIRED\"}");
+            return;
+        }
+        webServer.setUiBrowserReady(true);
         sendJsonSuccess(request);
     });
 
@@ -402,6 +426,7 @@ void WebServer::setupApiRoutes_() {
     });
 
     server.on("/programs", HTTP_GET, [](AsyncWebServerRequest* request) {
+        webServer.noteHeavyUiTraffic();
         if (rejectIfFlashBusy(request)) return;
         sendJsonFromFs(request, "/programs/index.json", "no-cache, no-store, must-revalidate");
     });
@@ -425,6 +450,7 @@ void WebServer::setupApiRoutes_() {
     });
 
     server.on("/program", HTTP_GET, [](AsyncWebServerRequest* request) {
+        webServer.noteHeavyUiTraffic();
         if (rejectIfFlashBusy(request)) return;
         if (!request->hasParam("id")) {
             request->send(400, kContentTypeText, "Missing id");

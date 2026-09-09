@@ -6,6 +6,44 @@
   const endpoints = APP.contract?.api?.endpoints || {};
   const timeoutsMs = APP.contract?.api?.timeoutsMs || {};
 
+  // SoftAP ESP8266: at most one device HTTP at a time (browser otherwise opens ~6 TCP).
+  let deviceFetchChain = Promise.resolve();
+  let deviceFetchInFlight = 0;
+
+  /**
+   * Serialize all SoftAP HTTP through one queue. Optional gap after each request
+   * lets lwIP drain before the next accept/send.
+   */
+  api.deviceFetch = function deviceFetch(url, options = {}) {
+    const gapMs = options.deviceGapMs ?? timeoutsMs.deviceRequestGapMs ?? 120;
+    const { deviceGapMs: _gapIgnored, ...fetchOpts } = options;
+    const run = async () => {
+      deviceFetchInFlight += 1;
+      try {
+        const headers = Object.assign(
+          {
+            'X-Requested-With': 'ElLineUI',
+            // Hint; server also sends Connection: close.
+            Connection: 'close'
+          },
+          fetchOpts.headers || {}
+        );
+        return await fetch(url, { cache: 'no-store', ...fetchOpts, headers });
+      } finally {
+        deviceFetchInFlight -= 1;
+        if (gapMs > 0 && typeof sleep === 'function') {
+          try { await sleep(gapMs); } catch (e) {}
+        }
+      }
+    };
+    const next = deviceFetchChain.then(run, run);
+    // Keep chain alive even if a caller forgets to catch.
+    deviceFetchChain = next.catch(() => {});
+    return next;
+  };
+
+  api.deviceFetchInFlight = function () { return deviceFetchInFlight; };
+
   function safeGetHeader(res, name) {
     try { return res?.headers?.get?.(name) || ''; } catch (e) { return ''; }
   }
@@ -13,7 +51,6 @@
   async function readResponseBody(res) {
     const ct = String(safeGetHeader(res, 'content-type') || '').toLowerCase();
     if (!res) return { data: {}, text: '', contentType: ct };
-    // Prefer JSON when advertised; otherwise preserve text/plain error messages.
     if (ct.includes('application/json') || ct.includes('+json')) {
       try { return { data: await res.json(), text: '', contentType: ct }; } catch (e) { return { data: {}, text: '', contentType: ct }; }
     }
@@ -29,11 +66,10 @@
     const timeoutMs = options.timeoutMs ?? timeoutsMs.default ?? 8000;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
-    const { timeoutMs: _ignored, ...rest } = options;
+    const { timeoutMs: _ignored, deviceGapMs, ...rest } = options;
     let res;
     try {
-      const headers = Object.assign({ 'X-Requested-With': 'ElLineUI' }, rest.headers || {});
-      res = await fetch(url, { cache: 'no-store', signal: controller.signal, ...rest, headers });
+      res = await api.deviceFetch(url, { signal: controller.signal, deviceGapMs, ...rest });
     } finally {
       clearTimeout(t);
     }
@@ -49,7 +85,6 @@
 
       if (text) return text;
 
-      // common: { success:false, message:"..." }
       if (data && typeof data === 'object') {
         if (typeof data.message === 'string' && data.message) return data.message;
         if (typeof data.error === 'string' && data.error) return data.error;
@@ -104,12 +139,11 @@
   api.waitForFlashCommit = async function waitForFlashCommit({ startLastMillis, expectedLastOp, timeoutMs = (timeoutsMs.flashCommit ?? 12000), Alpine }) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      // Flash commit status is delivered via SSE into `deviceStatus` store.
       const fc = Alpine?.store?.('deviceStatus')?.flashCommit || {};
       const advanced = (fc.lastMillis || 0) > (startLastMillis || 0);
       if (advanced && !fc.pending) {
         if (expectedLastOp && fc.lastOp && fc.lastOp !== expectedLastOp) {
-          // commit happened, but not the one we expected; keep waiting
+          // keep waiting
         } else {
           return { ok: !!fc.lastOk, lastOp: fc.lastOp };
         }
@@ -119,13 +153,6 @@
     return { ok: false, timeout: true };
   };
 
-  /**
-   * Helper for operations that:
-   * - hit an HTTP endpoint that triggers a flash write
-   * - then wait for SSE `deviceStatus.flashCommit` confirmation
-   *
-   * Centralizes: uiBusy + uiState.locked + consistent notifications + cleanup.
-   */
   api.runFlashWrite = async function runFlashWrite({
     Alpine,
     busyTitle = 'Сохранение',
@@ -139,13 +166,19 @@
     if (!Alpine) throw new Error('runFlashWrite requires Alpine');
     if (!request || typeof request !== 'function') throw new Error('runFlashWrite requires request()');
 
-    Alpine.store('uiBusy')?.show?.({ title: busyTitle, message: busyMessage });
-    Alpine.store('uiState').locked = true;
+    Alpine.store('uiBusy')?.show?.({ title: busyTitle, message: busyMessage, progress: 5 });
+    Alpine.store('uiBusy')?.startSoftProgress?.({
+      durationMs: Math.max(4000, Number(timeoutMsCommit) || 8000),
+      cap: 92
+    });
+    try { Alpine.store('uiState')?.setFlashLock?.(true); } catch (e) {}
     const startCommitMs = Alpine.store('deviceStatus')?.flashCommit?.lastMillis || 0;
 
     try {
       const { ok, status, data } = await request();
       if (api.handleBusy409?.(status)) return { ok: false, busy409: true, status, data };
+
+      try { Alpine.store('uiBusy')?.setProgress?.(35); } catch (e) {}
 
       if (ok) {
         try { await onHttpOk?.({ ok, status, data }); } catch (e) {}
@@ -153,6 +186,8 @@
 
       const successFlag = (data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, 'success')) ? !!data.success : ok;
       if (!ok || !successFlag) return { ok: false, status, data };
+
+      try { Alpine.store('uiBusy')?.setProgress?.(55); } catch (e) {}
 
       const res = await api.waitForFlashCommit({
         startLastMillis: startCommitMs,
@@ -162,7 +197,6 @@
       });
 
       if (res.timeout) {
-        // Do not keep UI blocked forever: commit confirmation is best-effort (network/SSE issues).
         try { Alpine.store('uiNotification')?.warning?.('Нет подтверждения записи во flash. Проверьте соединение.'); } catch (e) {}
         return { ok: false, timeout: true, status, data };
       }
@@ -171,14 +205,14 @@
         return { ok: false, commitOk: false, status, data };
       }
 
+      try { Alpine.store('uiBusy')?.setProgress?.(100); } catch (e) {}
       try { await onCommitOk?.({ status, data, commit: res }); } catch (e) {}
       return { ok: true, status, data, commit: res };
     } catch (e) {
       try { Alpine.store('uiNotification')?.error?.('Ошибка сети'); } catch (e2) {}
       return { ok: false, error: e };
     } finally {
-      Alpine.store('uiState').locked = false;
-      // If busy is in OK-mode, keep it open until user acknowledges.
+      try { Alpine.store('uiState')?.setFlashLock?.(false); } catch (e) {}
       if (!Alpine.store('uiBusy')?.okMode) Alpine.store('uiBusy')?.hide?.();
     }
   };
@@ -193,4 +227,3 @@
 
   api.endpoints = endpoints;
 })();
-

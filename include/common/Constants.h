@@ -156,7 +156,8 @@ namespace Timing {
     /// Минимальная частота yield/delay(0) в длинных циклах (ESP8266 WiFi/lwIP + soft WDT).
     constexpr uint32_t COOPERATE_INTERVAL_MS = 20;
     /// Период «диффа» SSE: сравнение блоков железа/режима без обязательной отправки каждого.
-    constexpr uint32_t SSE_STATUS_INTERVAL_MS = 500;
+    /// 1000 ms: меньше churn/queue pressure на ESP8266 при открытом UI (было 500).
+    constexpr uint32_t SSE_STATUS_INTERVAL_MS = 1000;
     /// Период лёгкого события `clocks`: uptime и таймер программы для синхронизации UI.
     constexpr uint32_t SSE_CLOCKS_INTERVAL_MS = 1000;
 
@@ -244,11 +245,16 @@ namespace MemorySlo {
     /// Минимальный free heap для безопасного старта HTTP listener в AP режиме.
     constexpr uint32_t MIN_HEAP_BEFORE_HTTP_START = 11000;
     /// Минимальный free heap для облегчённого `/bootstrap` (без heavy live payload).
-    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LITE = 7000;
-    /// Минимальный free heap для тяжёлого `/bootstrap/live` snapshot-ответа.
-    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LIVE = 10500;
+    /// Проверяется уже внутри handler: TCP/AsyncRequest уже оплачены (~2–3 KB).
+    /// Нужен запас только под response + один send chunk (~MSS), не под body-cbuf
+    /// (JSON — measured filler). Поле: при одном SoftAP HTTP free≈6900 → порог 7000
+    /// был недостижим и резал до эмита; 5500 оставляет ~1.4 KB маржи под send.
+    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LITE = 5500;
+    /// Минимальный free heap для `/bootstrap/live` (тот же model: request уже есть).
+    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LIVE = 5500;
     /// Минимальный free heap для отправки SSE/log сообщений.
-    constexpr uint32_t MIN_HEAP_FOR_SSE_SEND = 9000;
+    /// Was 9000 — blocked all SSE after UI load in debug (~5 KB free) → panel stuck on «Загрузка данных…».
+    constexpr uint32_t MIN_HEAP_FOR_SSE_SEND = 4500;
     /// Минимальный непрерывный блок для JSON/SSE в web-пути.
     constexpr uint32_t MIN_MAX_BLOCK_FOR_WEB_SEND = 3072;
 }
@@ -317,6 +323,10 @@ namespace NetTiming {
     constexpr uint32_t MQTT_RECONNECT_INTERVAL_MS = 5000;
     /// Ожидание CONNACK после CONNECT на GSM (секунды RTT + очередь оператора).
     constexpr uint32_t MQTT_FSM_CONNECT_TIMEOUT_MS = 30000;
+    /// How often to log "still deferred" while SoftAP UI init holds cellular off.
+    constexpr uint32_t CELLULAR_UI_BOOTSTRAP_DEFER_LOG_MS = 15000;
+    /// FE waits this long after checklist before POST /ui/ready (GSM/MQTT stay suspended).
+    constexpr uint32_t CELLULAR_AFTER_UI_QUIET_MS = 15000;
 }
 
 // ============================================================
@@ -358,10 +368,13 @@ namespace WebUi {
 // SSE_MAX_QUEUED_MESSAGES (см. platformio.ini); здесь только наши пороги на отправку.
 // ============================================================
 namespace WebSseLimits {
+    /// Максимум одновременных SSE `/events` клиентов (эпизодический UI: одна вкладка).
+    constexpr uint8_t MAX_SSE_CLIENTS = 1;
     /// Общий мягкий порог avgPacketsWaiting() перед send (SSE log и incremental статус одной очередью).
-    constexpr size_t SSE_SOFT_QUEUE_MAX = 8;
+    /// Держать ниже SSE_MAX_QUEUED_MESSAGES (platformio.ini), иначе soft gate бесполезен.
+    constexpr size_t SSE_SOFT_QUEUE_MAX = 4;
     constexpr size_t STATUS_QUEUE_MAX = SSE_SOFT_QUEUE_MAX;
-    constexpr size_t STATUS_FORCE_QUEUE_MAX = 16;
+    constexpr size_t STATUS_FORCE_QUEUE_MAX = 8;
     /// Пред-OTA окно (идёт upload, но режим OTA ещё не активен): пороги ниже, чтобы освободить heap для Update.begin.
     constexpr size_t OTA_PREP_STATUS_QUEUE_MAX = 4;
     constexpr size_t OTA_PREP_LOG_QUEUE_MAX = 2;
@@ -374,9 +387,12 @@ namespace WebAssets {
     static const char INDEX_HTML[] PROGMEM = "/index.html";
 
     /// Обязательные файлы для “UI доступен” (FSManager учитывает возможные .gz варианты).
-    /// Монолитный шелл: HTML+CSS+JS в одном index.html(.gz); отдельные /style.css и /script.js не требуются.
+    /// HTML+CSS шелл (index) и отдельный JS bundle — два GET, чтобы SoftAP не обрывал вкладки
+    /// в хвосте одного огромного gzip-монолита.
+    static const char APP_BUNDLE_JS[] PROGMEM = "/app.bundle.js";
     static const char* const REQUIRED[] PROGMEM = {
         INDEX_HTML,
+        APP_BUNDLE_JS,
     };
 
     constexpr size_t REQUIRED_COUNT = sizeof(REQUIRED) / sizeof(REQUIRED[0]);
@@ -472,8 +488,10 @@ namespace Sim800Tcp {
 // FS метаданные (ожидаемые максимальные размеры файлов)
 // ============================================================
 namespace FileMax {
-    /// Монолитный index.html (несжатый на FS): разметка + style.css + bundled script.js из build.py.
-    constexpr uint32_t INDEX_HTML = 786432;
+    /// index.html на FS: разметка + inline CSS (JS отдельно в app.bundle.js).
+    constexpr uint32_t INDEX_HTML = 262144;
+    /// Bundled Alpine+app JS (несжатый); на FS обычно лежит .gz.
+    constexpr uint32_t APP_BUNDLE_JS = 786432;
     constexpr uint32_t FAVICON_ICO = 2048;
 }
 

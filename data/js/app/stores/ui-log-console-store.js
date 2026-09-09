@@ -1,4 +1,4 @@
-// logs store (lazy render via intersect)
+// logs store (lazy render via intersect + explicit flush on System enter)
 (function () {
   const APP = (window.APP = window.APP || {});
   APP.stores = APP.stores || {};
@@ -14,19 +14,24 @@
         this._el = document.getElementById('logsDisplay');
         return this._el;
       },
+      flushToView() {
+        this.text = this.entries.join('\n');
+        const el = this._getEl();
+        if (el) {
+          requestAnimationFrame(() => {
+            el.scrollTop = el.scrollHeight;
+          });
+        }
+      },
       setVisible(v) {
         const next = !!v;
-        if (next === this.visible) return;
-        this.visible = next;
-        if (this.visible) {
-          this.text = this.entries.join('\n');
-          const el = this._getEl();
-          if (el) {
-            requestAnimationFrame(() => {
-              el.scrollTop = el.scrollHeight;
-            });
-          }
+        if (next === this.visible) {
+          // Re-entering System / intersect while already visible must still refresh text.
+          if (next) this.flushToView();
+          return;
         }
+        this.visible = next;
+        if (this.visible) this.flushToView();
       },
       add(line) {
         const el = this._getEl();
@@ -55,4 +60,3 @@
     });
   };
 })();
-

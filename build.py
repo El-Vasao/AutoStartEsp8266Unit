@@ -375,9 +375,9 @@ def gzip_file(src_path: Path, dst_path: Path):
     with src_path.open("rb") as f_in, gzip.open(dst_path, "wb", compresslevel=9) as f_out:
         shutil.copyfileobj(f_in, f_out)
 
-# Маркеры в data/index.html — заменяются на встроенные style.css и bundle (один HTTP GET для шелла).
+# Маркер в data/index.html — заменяется на встроенный style.css.
+# JS bundle пишется отдельно как app.bundle.js (см. build_fs_tree).
 INJECT_MARKER_CSS = "<!-- INJECT_APP_CSS -->"
-INJECT_MARKER_JS = "<!-- INJECT_APP_JS -->"
 
 
 def escape_inline_script(js: str) -> str:
@@ -385,10 +385,10 @@ def escape_inline_script(js: str) -> str:
     return js.replace("</script>", "<\\/script>")
 
 
-def build_monolithic_index(files_dir: Path, bundle_bytes: bytes, out_path: Path) -> None:
+def build_monolithic_index(files_dir: Path, out_path: Path) -> None:
     """
-    Собирает index.html для LittleFS: шаблон из data/index.html + data/style.css + bundle (как раньше script.js).
-    Отдельные /style.css и /script.js в образ не кладём.
+    Собирает index.html для LittleFS: шаблон data/index.html + inline style.css.
+    Крупный JS уходит отдельно в app.bundle.js (SoftAP: HTML с вкладками доезжает раньше скрипта).
     """
     tpl_path = files_dir / "index.html"
     css_path = files_dir / "style.css"
@@ -398,13 +398,12 @@ def build_monolithic_index(files_dir: Path, bundle_bytes: bytes, out_path: Path)
         raise RuntimeError(f"Missing {css_path}")
     template = tpl_path.read_text(encoding="utf-8")
     css = css_path.read_text(encoding="utf-8")
-    if INJECT_MARKER_CSS not in template or INJECT_MARKER_JS not in template:
-        raise RuntimeError("data/index.html must contain INJECT_APP_CSS and INJECT_APP_JS markers")
-    js_raw = bundle_bytes.decode("utf-8", errors="replace")
-    js_esc = escape_inline_script(js_raw)
+    if INJECT_MARKER_CSS not in template:
+        raise RuntimeError("data/index.html must contain INJECT_APP_CSS marker")
+    if "ui-doc-complete" not in template:
+        raise RuntimeError("data/index.html must contain #ui-doc-complete delivery sentinel")
     css_block = "<style>\n" + css + "\n</style>"
-    js_block = "<script>\n" + js_esc + "\n</script>"
-    html = template.replace(INJECT_MARKER_CSS, css_block, 1).replace(INJECT_MARKER_JS, js_block, 1)
+    html = template.replace(INJECT_MARKER_CSS, css_block, 1)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
 
@@ -547,7 +546,8 @@ def patch_settings_schema_with_hw_limits(schema: dict, hw: dict) -> dict:
 def build_fs_tree(files_dir: Path, gzip_enabled: bool = True, include_config_json: bool = False) -> Path:
     """
     Готовим виртуальное дерево LittleFS из data/:
-    - bundling (libs + script.js) -> вшивается в index.html (монолитный шелл, один GET для HTML+CSS+JS)
+    - bundling (libs + script.js) -> app.bundle.js(.gz)
+    - index.html + inline CSS -> index.html(.gz); доставка вкладок не зависит от хвоста огромного JS
     - gzip выбранных расширений
     - по умолчанию исключаем config.json из обхода (чтобы не дублировать), затем:
       - include_config_json=False: в образ не кладём (OTA-пакет — без пользовательского конфига)
@@ -564,7 +564,8 @@ def build_fs_tree(files_dir: Path, gzip_enabled: bool = True, include_config_jso
         if not bundle:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise RuntimeError("Пустой JS bundle — проверьте data/script.js и js/libs (build_script_bundle).")
-        build_monolithic_index(files_dir, bundle, temp_dir / "index.html")
+        build_monolithic_index(files_dir, temp_dir / "index.html")
+        (temp_dir / "app.bundle.js").write_bytes(bundle)
 
     for root, dirs, files in os.walk(files_dir):
         for file in files:
@@ -574,7 +575,7 @@ def build_fs_tree(files_dir: Path, gzip_enabled: bool = True, include_config_jso
             if rel_path == "config.json":
                 continue
 
-            # В gzip-режиме: отдельные ассеты шелла не кладём — всё в index.html.
+            # В gzip-режиме: сырой шелл не кладём — index.html + app.bundle.js собираются выше.
             if gzip_enabled:
                 if rel_path in JS_LIBS:
                     continue
@@ -654,7 +655,7 @@ def pack_ota(firmware_path: str, files_dir: str, output_path: str, gzip_enabled:
 def upload_filesystem(files_dir: str = "data", gzip_enabled: bool = True, cleanup_gz: bool = True):
     """
     Заливка LittleFS на контроллер:
-    - готовим временное дерево FS (монолитный index.html из шаблона data/index.html + style.css + bundle, затем gzip)
+    - готовим временное дерево FS (index.html.gz + app.bundle.js.gz + schemas, затем gzip)
     - если есть data/config.json — кладём его в образ (раньше скрипт его намеренно выкидывал)
     - ВРЕМЕННО подменяем папку data/ в проекте
     - вызываем `pio run --target uploadfs`

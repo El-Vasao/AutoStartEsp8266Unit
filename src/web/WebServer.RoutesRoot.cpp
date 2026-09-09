@@ -6,6 +6,7 @@ using namespace web_internal;
 
 void WebServer::setupRootRoutes_() {
     server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+        webServer.noteHeavyUiTraffic();
         auto sendFallback = [&]() {
             AsyncWebServerResponse* response = request->beginResponse_P(
                 200,

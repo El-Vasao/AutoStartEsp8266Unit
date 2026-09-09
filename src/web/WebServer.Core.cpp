@@ -43,6 +43,8 @@ WebServer::WebServer()
       lastObservedSseClients_(0),
       sseDiagTailUntilMs_(0),
       lastUiActivityMs_(0),
+      lastHeavyUiMs_(0),
+      uiBrowserReady_(false),
       server(WebConfig::HTTP_PORT),
       apActive(false),
       serverActive(false),
@@ -53,6 +55,34 @@ WebServer::WebServer()
       postedConfigJsonPending(false),
       postedProgramJsonPending(false),
       events("/events") {}
+
+void WebServer::noteHeavyUiTraffic() {
+    const uint32_t now = millis();
+    lastHeavyUiMs_ = now ? now : 1;
+    if (uiBrowserReady_) {
+        uiBrowserReady_ = false;
+        logger.log("[WebServer] UI browser-ready cleared (heavy traffic)\n");
+    }
+    // Immediate drop — do not wait for next Core::handleNormal().
+    core.suspendCellularForUiLoad();
+}
+
+void WebServer::clearHeavyUiTraffic() {
+    lastHeavyUiMs_ = 0;
+    uiBrowserReady_ = false;
+}
+
+void WebServer::clearUiBrowserReady() {
+    uiBrowserReady_ = false;
+}
+
+void WebServer::setUiBrowserReady(bool ready) {
+    if (uiBrowserReady_ == ready) return;
+    uiBrowserReady_ = ready;
+    if (ready) {
+        logger.log("[WebServer] UI browser-ready set (FE checklist + settle)\n");
+    }
+}
 
 bool WebServer::isFlashBusy() const {
     // Важно: здесь учитываем и “глобальные” deferred FS операции, и локальные POST-потоки web.

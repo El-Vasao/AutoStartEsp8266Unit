@@ -1,35 +1,55 @@
-// SSE only (no /status polling)
+// SoftAP-safe SSE: one EventSource, no auto /bootstrap/live, heartbeat after panel-ready.
 (function () {
   const APP = (window.APP = window.APP || {});
   APP.sse = APP.sse || {};
 
   APP.sse.init = function initSse(Alpine) {
-    // Restartable singleton: init() may be called multiple times after partial failures.
     const prev = APP.sse._ctx;
     if (prev && prev.running) return;
 
     const endpoints = APP.api?.endpoints || APP.contract?.api?.endpoints || {};
+    const timeouts = APP.api?.timeoutsMs || APP.contract?.api?.timeoutsMs || {};
     const log = APP.utils?.log;
+
+    // Re-init after spurious teardown (SoftAP F5 / bfcache) while document still alive.
+    if (prev && !prev.running) {
+      try {
+        if (prev.reconnectTimer) clearTimeout(prev.reconnectTimer);
+        if (prev.heartbeatTimer) clearInterval(prev.heartbeatTimer);
+        if (prev.staleTimer) clearInterval(prev.staleTimer);
+        try { prev.source?.close?.(); } catch (e) {}
+      } catch (e) {}
+    }
 
     const ctx = (APP.sse._ctx = {
       running: true,
+      stopped: false,
+      eventsStarted: false,
       source: null,
       reconnectTimer: null,
       heartbeatTimer: null,
       heartbeatInFlight: false,
-      backoffMs: 1000,
-      state: 'disconnected', // connected|disconnected|backoff|stale
+      backoffMs: 4000,
+      state: 'idle', // idle|connecting|connected|backoff|stale
       lastEventAt: 0,
+      connectingSince: 0,
       heartbeatMs: 5000,
       staleTimer: null,
-      uiSessionId: ((((Date.now() & 0x7fffffff) ^ ((Math.random() * 0x7fffffff) | 0)) >>> 0) || 1),
-      bootstrapLiveInFlight: null,
-      bootstrapLiveLastMs: 0,
-      bootstrapLiveCooldownMs: 8000,
-      statusQueue: [], // FIFO of { kind, payload } until stores are ready
-      logQueue: [],
+      // SoftAP F5: reuse prior session id when present (avoid close/open race).
+      uiSessionId: (function () {
+        try {
+          const raw = sessionStorage.getItem('uiSessionId');
+          const n = raw ? (parseInt(raw, 10) >>> 0) : 0;
+          if (n) return n;
+        } catch (e) {}
+        return ((((Date.now() & 0x7fffffff) ^ ((Math.random() * 0x7fffffff) | 0)) >>> 0) || 1);
+      })(),
+      panelReadyWaiters: [],
+      gotMode: false,
+      gotHardware: false,
     });
     APP.uiSessionId = ctx.uiSessionId;
+    try { sessionStorage.setItem('uiSessionId', String(ctx.uiSessionId)); } catch (e) {}
 
     Alpine.store('net', Alpine.store('net') || {
       state: 'disconnected',
@@ -49,15 +69,50 @@
       } catch (e) {}
     }
 
+    function isPanelReady() {
+      try {
+        const ds = Alpine?.store?.('deviceStatus');
+        if (!ds) return false;
+        const modeOk = !!(ds.mode && ds.mode !== '—');
+        const nRelays = Number(ds.hwCounts?.relays) || 0;
+        const nInputs = Number(ds.hwCounts?.inputs) || 0;
+        const relaysOk = Array.isArray(ds.relays) && (nRelays === 0 || ds.relays.length === nRelays);
+        const inputsOk = Array.isArray(ds.inputs) && (nInputs === 0 || ds.inputs.length === nInputs);
+        return modeOk && relaysOk && inputsOk && ctx.gotMode && ctx.gotHardware;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function notifyPanelReady() {
+      if (!isPanelReady()) return;
+      if (!ctx.heartbeatTimer) startHeartbeat();
+      const waiters = ctx.panelReadyWaiters.splice(0);
+      for (const w of waiters) {
+        try { w(true); } catch (e) {}
+      }
+    }
+
+    function resetPanelFlags() {
+      ctx.gotMode = false;
+      ctx.gotHardware = false;
+    }
+
     function scheduleReconnect() {
       if (ctx.reconnectTimer) return;
+      if (!ctx.eventsStarted || !ctx.running) return;
+      if (ctx.source) return;
       setState('backoff');
+      // Until panel-ready: fast SoftAP reconnect (F5 zombie). After ready: gentler ≥4s.
+      const floor = isPanelReady() ? 4000 : 500;
+      const waitMs = Math.max(ctx.backoffMs, floor);
       ctx.reconnectTimer = setTimeout(() => {
         ctx.reconnectTimer = null;
+        if (ctx.source) return;
         connectSSE();
-      }, ctx.backoffMs);
-      const jitter = Math.floor(Math.random() * 200);
-      ctx.backoffMs = Math.min(ctx.backoffMs * 2 + jitter, 8000);
+      }, waitMs);
+      const jitter = Math.floor(Math.random() * 400);
+      ctx.backoffMs = Math.min(Math.max(ctx.backoffMs, floor) * 2 + jitter, 12000);
     }
 
     function buildSessionBody(close) {
@@ -67,7 +122,6 @@
       return body;
     }
 
-    /** @returns {Promise<Response|void>} */
     function postUiSession(close) {
       const url = endpoints.uiSession || '/ui/session';
       const body = buildSessionBody(close);
@@ -82,16 +136,25 @@
       if (!close && ctx.heartbeatInFlight) return Promise.resolve();
       if (!close) ctx.heartbeatInFlight = true;
       try {
-        return fetch(url, {
-          method: 'POST',
-          cache: 'no-store',
-          keepalive: !!close,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-            'X-Requested-With': 'ElLineUI'
-          },
-          body: body.toString()
-        }).catch(() => {}).finally(() => {
+        const deviceFetch = APP.api?.deviceFetch;
+        const doFetch = deviceFetch
+          ? deviceFetch(url, {
+              method: 'POST',
+              keepalive: !!close,
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+              body: body.toString()
+            })
+          : fetch(url, {
+              method: 'POST',
+              cache: 'no-store',
+              keepalive: !!close,
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                'X-Requested-With': 'ElLineUI'
+              },
+              body: body.toString()
+            });
+        return doFetch.catch(() => {}).finally(() => {
           if (!close) ctx.heartbeatInFlight = false;
         });
       } catch (e) {
@@ -100,34 +163,49 @@
       }
     }
 
-    /** Первый POST /ui/session до EventSource — снимает гонку с активной UI-сессией на устройстве. */
     function waitForUiSessionRegistered() {
       const url = endpoints.uiSession || '/ui/session';
       const body = buildSessionBody(false);
-      const tries = 6;
       const delay = ms => new Promise(cb => setTimeout(cb, ms));
-      async function run() {
-        for (let i = 0; i < tries; i++) {
+      const attemptMs = 3000;
+      return (async () => {
+        for (let i = 0; i < 6; i++) {
+          const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+          const t = controller ? setTimeout(() => {
+            try { controller.abort(); } catch (e) {}
+          }, attemptMs) : null;
           try {
-            const res = await fetch(url, {
+            const deviceFetch = APP.api?.deviceFetch;
+            const opts = {
               method: 'POST',
-              cache: 'no-store',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-                'X-Requested-With': 'ElLineUI'
-              },
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
               body: body.toString()
-            });
+            };
+            if (controller) opts.signal = controller.signal;
+            const res = deviceFetch
+              ? await deviceFetch(url, opts)
+              : await fetch(url, {
+                  ...opts,
+                  cache: 'no-store',
+                  headers: {
+                    ...opts.headers,
+                    'X-Requested-With': 'ElLineUI'
+                  }
+                });
             if (res && res.ok) return;
-          } catch (e) {}
-          await delay(120 * (i + 1));
+          } catch (e) {
+            // timeout / network — retry
+          } finally {
+            if (t) clearTimeout(t);
+          }
+          await delay(200 * (i + 1));
         }
-      }
-      return run();
+      })();
     }
 
     function startHeartbeat() {
       if (ctx.heartbeatTimer) return;
+      if (!isPanelReady()) return;
       postUiSession(false);
       ctx.heartbeatTimer = setInterval(() => postUiSession(false), ctx.heartbeatMs);
     }
@@ -143,108 +221,62 @@
         if (!next || next < 500 || next > 60000) return;
         if (next === ctx.heartbeatMs) return;
         ctx.heartbeatMs = next;
-        stopHeartbeat();
-        startHeartbeat();
+        if (ctx.heartbeatTimer) {
+          stopHeartbeat();
+          startHeartbeat();
+        }
       } catch (e) {}
     };
 
-    function canUseStores() {
-      try {
-        return !!(Alpine?.store?.('deviceStatus')?.patchFromSse && Alpine?.store?.('uiLogs')?.add);
-      } catch (e) {
-        return false;
+    function markStatusKind(kind, payload) {
+      if (kind === 'mode' || ((kind === 'snapshot' || kind === 'status') && payload?.mode)) {
+        ctx.gotMode = true;
       }
-    }
-
-    function flushQueues() {
-      if (!canUseStores()) return;
-      try {
-        if (ctx.statusQueue.length) {
-          const ds = Alpine.store('deviceStatus');
-          for (const entry of ctx.statusQueue.splice(0)) {
-            if (entry && typeof entry === 'object' && entry.kind) ds.patchFromSse(entry.kind, entry.payload);
-            else if (typeof entry === 'object' && entry !== null && !entry.kind) ds.updateFromSSE(entry);
-          }
+      if (kind === 'hardware' || kind === 'snapshot' || kind === 'status') {
+        if (kind === 'hardware' || payload?.relaysById || payload?.inputsById || Array.isArray(payload?.relays)) {
+          ctx.gotHardware = true;
         }
-      } catch (e) {}
-      try {
-        if (ctx.logQueue.length) {
-          const logs = Alpine.store('uiLogs');
-          for (const msg of ctx.logQueue.splice(0)) logs.add(msg);
-        }
-      } catch (e) {}
+      }
     }
 
     function connectSSE() {
       if (!window.EventSource) {
-        setState('disconnected');
+        setState('idle');
         return;
       }
-
       if (ctx.source) return;
 
       try {
+        ctx.connectingSince = Date.now();
+        setState('connecting');
         ctx.source = new EventSource(endpoints.events || '/events');
       } catch (e) {
+        ctx.source = null;
         scheduleReconnect();
         return;
       }
 
       ctx.source.onopen = () => {
-        ctx.backoffMs = 1000;
+        ctx.backoffMs = 4000;
+        ctx.connectingSince = 0;
         setState('connected');
       };
 
       function onStatusPayload(kind, raw) {
         ctx.lastEventAt = Date.now();
         const payload = JSON.parse(raw);
-        if (canUseStores()) Alpine.store('deviceStatus').patchFromSse(kind, payload);
-        else {
-          ctx.statusQueue.push(kind === 'status' ? payload : { kind, payload });
-          if (ctx.statusQueue.length > 16) ctx.statusQueue = ctx.statusQueue.slice(-16);
-        }
-        flushQueues();
+        markStatusKind(kind, payload);
+        try {
+          Alpine.store('deviceStatus').patchFromSse(kind, payload);
+        } catch (e) {}
         setState('connected');
-      }
-
-      async function refetchBootstrapLive() {
-        const now = Date.now();
-        if (ctx.bootstrapLiveInFlight) return ctx.bootstrapLiveInFlight;
-        if ((now - ctx.bootstrapLiveLastMs) < ctx.bootstrapLiveCooldownMs) return null;
-        const uiLocked = !!Alpine?.store?.('uiState')?.locked;
-        if (uiLocked) return null;
-
-        const apiJson = APP.api?.apiJson;
-        const bootstrapUrl = endpoints.bootstrapLive || APP.contract?.api?.endpoints?.bootstrapLive || '/bootstrap/live';
-        if (!apiJson) return;
-        ctx.bootstrapLiveInFlight = (async () => {
-          try {
-            const res = await apiJson(bootstrapUrl, { timeoutMs: 6000 });
-            if (res?.ok && res.data && typeof res.data === 'object') {
-              if (canUseStores()) Alpine.store('deviceStatus').patchFromSse('snapshot', res.data);
-              else ctx.statusQueue.push({ kind: 'snapshot', payload: res.data });
-              ctx.bootstrapLiveLastMs = Date.now();
-            }
-          } catch (e) {}
-          flushQueues();
-        })().finally(() => {
-          ctx.bootstrapLiveInFlight = null;
-        });
-        return ctx.bootstrapLiveInFlight;
+        notifyPanelReady();
       }
 
       ctx.source.addEventListener('resync', () => {
+        // Firmware paced baseline follows; do not HTTP /bootstrap/live.
         ctx.lastEventAt = Date.now();
-        const uiLocked = !!Alpine?.store?.('uiState')?.locked;
-        if (!uiLocked) {
-          refetchBootstrapLive();
-        } else {
-          // Do not trigger heavy refetch during startup lock; retry window remains open after unlock.
-          ctx.bootstrapLiveLastMs = 0;
-          if (ctx.bootstrapLiveInFlight) {
-            // let current one finish if any, but do not start new fetches
-          }
-        }
+        resetPanelFlags();
         setState('connected');
       });
 
@@ -256,30 +288,65 @@
       }
       ctx.source.addEventListener('log', e => {
         ctx.lastEventAt = Date.now();
-        if (canUseStores()) Alpine.store('uiLogs').add(e.data);
-        else {
-          ctx.logQueue.push(String(e.data || ''));
-          if (ctx.logQueue.length > 30) ctx.logQueue = ctx.logQueue.slice(-30);
-        }
-        flushQueues();
+        try { Alpine.store('uiLogs').add(e.data); } catch (err) {}
         setState('connected');
       });
 
       ctx.source.onerror = () => {
         setState('disconnected');
-        try {
-          // EventSource can keep failing without transitioning to CLOSED on some browsers;
-          // proactively re-create connection with backoff.
-          try { ctx.source?.close?.(); } catch (e) {}
-          ctx.source = null;
+        const es = ctx.source;
+        if (!es) {
           scheduleReconnect();
-        } catch (e) { log?.debug?.('SSE onerror handler failed', e); }
+          return;
+        }
+        // Browser is auto-reconnecting the same EventSource — do NOT close or open a second one
+        // (MAX_SSE_CLIENTS=1 → reject → permanent flap).
+        if (es.readyState === EventSource.CONNECTING) {
+          if (!ctx.connectingSince) ctx.connectingSince = Date.now();
+          if ((Date.now() - ctx.connectingSince) > 20000) {
+            try { es.close(); } catch (e) {}
+            ctx.source = null;
+            ctx.connectingSince = 0;
+            resetPanelFlags();
+            scheduleReconnect();
+          }
+          return;
+        }
+        if (es.readyState === EventSource.CLOSED) {
+          ctx.source = null;
+          ctx.connectingSince = 0;
+          resetPanelFlags();
+          scheduleReconnect();
+          return;
+        }
+        // OPEN + spurious error: ignore (do not close).
       };
     }
 
-    function stopAll() {
+    function waitForPanelReady(timeoutMs) {
+      if (isPanelReady()) return Promise.resolve(true);
+      return new Promise(resolve => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          resolve(!!ok);
+        };
+        const timer = setTimeout(() => finish(false), Math.max(1000, timeoutMs || 12000));
+        ctx.panelReadyWaiters.push((ok) => {
+          clearTimeout(timer);
+          finish(ok);
+        });
+      });
+    }
+
+    function stopAll(ev) {
+      // pagehide on F5: tear down EventSource/timers only. Keep uiSessionId so reload reuses
+      // the same SoftAP UI session (close+new races MAX_SSE_CLIENTS=1).
+      if (ctx.stopped) return;
+      ctx.stopped = true;
       stopHeartbeat();
-      postUiSession(true);
+      // Do NOT postUiSession(true) / clear sessionStorage — session expires on FW timeout.
       try { if (ctx.source) ctx.source.close(); } catch (e) {}
       ctx.source = null;
       if (ctx.reconnectTimer) clearTimeout(ctx.reconnectTimer);
@@ -287,47 +354,102 @@
       if (ctx.staleTimer) clearInterval(ctx.staleTimer);
       ctx.staleTimer = null;
       ctx.running = false;
+      ctx.eventsStarted = false;
+      const waiters = ctx.panelReadyWaiters.splice(0);
+      for (const w of waiters) {
+        try { w(false); } catch (e) {}
+      }
+      void ev;
     }
 
     function startStaleDetector() {
       if (ctx.staleTimer) return;
-      // If SSE is silent for too long, reconnect (ESP can drop TCP silently).
-      const maxSilentMs = 12000;
+      const maxSilentMs = 20000;
       ctx.staleTimer = setInterval(() => {
         try {
+          if (!ctx.eventsStarted) return;
           const silentMs = Date.now() - (ctx.lastEventAt || 0);
           const net = Alpine?.store?.('net');
           if (net) net.staleMs = Math.max(0, silentMs);
+          // Only force-close when we had traffic then went silent while claiming connected.
           if (ctx.state === 'connected' && ctx.lastEventAt && silentMs > maxSilentMs) {
             setState('stale');
             try { ctx.source?.close?.(); } catch (e) {}
             ctx.source = null;
+            resetPanelFlags();
             scheduleReconnect();
           }
         } catch (e) {}
       }, 1000);
     }
 
-    // If user returns to the tab, try SSE again.
     document.addEventListener('visibilitychange', () => {
       try {
-        if (!document.hidden && !ctx.source) connectSSE();
+        if (!document.hidden && ctx.eventsStarted && !ctx.source && !ctx.reconnectTimer) {
+          scheduleReconnect();
+        }
       } catch (e) {}
     }, { passive: true });
 
-    window.addEventListener('beforeunload', stopAll);
+    // Only pagehide — beforeunload+pagehide duplicated session close on every F5.
     window.addEventListener('pagehide', stopAll);
 
     startStaleDetector();
-    waitForUiSessionRegistered()
-      .then(() => {
-        connectSSE();
+
+    APP.sse.isPanelReady = function isPanelReadyExport() {
+      return isPanelReady();
+    };
+
+    APP.sse.isConnected = function isConnected() {
+      return !!ctx.source && ctx.source.readyState === EventSource.OPEN;
+    };
+
+    /**
+     * Session → one EventSource → wait mode+hardware → heartbeat (only when ready).
+     * @param {{ timeoutMs?: number }} [opts]
+     * @returns {Promise<boolean>}
+     */
+    APP.sse.startEvents = async function startEvents(opts) {
+      // SoftAP F5: pagehide may tear EventSource while document reloads/stays.
+      // Revive and keep the same uiSessionId (touch on server); do not rotate id.
+      if (!ctx.running) {
+        if (document.visibilityState === 'hidden') return false;
+        ctx.stopped = false;
+        ctx.running = true;
+        ctx.eventsStarted = false;
+        ctx.source = null;
+        stopHeartbeat();
+        if (ctx.reconnectTimer) {
+          clearTimeout(ctx.reconnectTimer);
+          ctx.reconnectTimer = null;
+        }
+        try {
+          const raw = sessionStorage.getItem('uiSessionId');
+          const n = raw ? (parseInt(raw, 10) >>> 0) : 0;
+          if (n) ctx.uiSessionId = n;
+        } catch (e) {}
+        APP.uiSessionId = ctx.uiSessionId;
+        try { sessionStorage.setItem('uiSessionId', String(ctx.uiSessionId)); } catch (e) {}
+        resetPanelFlags();
+        log?.warn?.('[sse] revived after teardown (reuse session)', ctx.uiSessionId);
+      }
+      if (ctx.eventsStarted && isPanelReady()) {
         startHeartbeat();
-      })
-      .catch(() => {
-        connectSSE();
-        startHeartbeat();
-      });
+        return true;
+      }
+      ctx.eventsStarted = true;
+      try {
+        await waitForUiSessionRegistered();
+      } catch (e) {}
+      connectSSE();
+      const panelTimeout = Number(opts?.timeoutMs)
+        || Number(timeouts.sseInitDeadlineMs)
+        || Number(timeouts.ssePanelReadyTimeoutMs)
+        || 12000;
+      const ready = await waitForPanelReady(panelTimeout);
+      if (ready) startHeartbeat();
+      // On timeout: leave EventSource running (browser/our reconnect); no heartbeat until panel-ready.
+      return ready;
+    };
   };
 })();
-

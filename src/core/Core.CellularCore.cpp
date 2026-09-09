@@ -12,9 +12,10 @@
  * @brief Реализация glue‑логики сотового канала (GSM + MQTT) для Core.
  *
  * Принципы:
- * - Неблокирующее обслуживание: GSM всегда тикает, MQTT — только когда это безопасно.
- * - Ограничение UX/устойчивости: когда активна UI‑сессия, отключаем потенциально блокирующий reconnect MQTT
- *   (если MQTT не в неблокирующем режиме).
+ * - Неблокирующее обслуживание: GSM всегда тикает в `service()`, MQTT — когда модем READY.
+ * - В NORMAL: SoftAP STA / heavy UI HTTP → cellular suspend; FE POST /ui/ready после
+ *   checklist+settle → снова service. Пока SoftAP без UI-storm — MQTT допустим.
+ * - MQTT reconnect при service остаётся enabled (WDT — в transport budgets).
  *
  * Память:
  * - Без аллокаций heap (только указатели на уже существующие подсистемы).

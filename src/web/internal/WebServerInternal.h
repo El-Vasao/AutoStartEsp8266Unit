@@ -4,7 +4,8 @@
  *
  * Важно (ESP8266/память):
  * - Этот файл — часть реализации web-подсистемы. Его нельзя включать вне `src/web/` (и подпапок).
- * - JSON ответы по возможности пишутся потоково в `AsyncResponseStream` без большого промежуточного DOM.
+ * - JSON body: только measured streaming (`sendJsonStreaming`) — count + filler + SkippingPrint.
+ * - Запрещён `beginResponseStream` для JSON: он копирует всё тело в растущий cbuf (ложный «стрим»).
  *
  * Запрещено:
  * - Добавлять сюда “общепроектные” зависимости: только то, что нужно WebServer.
@@ -21,17 +22,64 @@
 #include "core/Core.h"
 #include "common/Logger.h"
 #include "common/Constants.h"
+#include "json/JsonCountingPrint.h"
 
 namespace web_internal {
 
 static constexpr const char* kContentTypeJson = "application/json";
 static constexpr const char* kContentTypeText = "text/plain";
 
+using JsonEmitFn = void (*)(Print&);
+
+/**
+ * Print that discards the first `skip` bytes, then copies into a fixed out buffer.
+ * Used by AwsResponseFiller: re-emit full JSON each chunk, skip already-sent prefix.
+ */
+class SkippingPrint final : public Print {
+public:
+    SkippingPrint(size_t skip, uint8_t* out, size_t cap)
+        : skip_(skip), out_(out), cap_(cap), produced_(0) {}
+
+    size_t produced() const { return produced_; }
+
+    size_t write(uint8_t b) override {
+        if (skip_ > 0) {
+            --skip_;
+            return 1;
+        }
+        if (out_ && produced_ < cap_) {
+            out_[produced_++] = b;
+        }
+        return 1;
+    }
+
+    size_t write(const uint8_t* buffer, size_t size) override {
+        if (!buffer || size == 0) return 0;
+        size_t i = 0;
+        while (i < size && skip_ > 0) {
+            --skip_;
+            ++i;
+        }
+        while (i < size && out_ && produced_ < cap_) {
+            out_[produced_++] = buffer[i++];
+        }
+        return size;
+    }
+
+private:
+    size_t skip_;
+    uint8_t* out_;
+    size_t cap_;
+    size_t produced_;
+};
+
 static inline void addNoCacheHeaders(AsyncWebServerResponse* resp) {
     if (!resp) return;
     resp->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     resp->addHeader("Pragma", "no-cache");
     resp->addHeader("Expires", "0");
+    // SoftAP ESP8266: force one request per TCP so the browser cannot pile keep-alives.
+    resp->addHeader("Connection", "close");
 }
 
 static inline void addSessionRevalidateHeaders(AsyncWebServerResponse* resp, const char* etag) {
@@ -40,9 +88,8 @@ static inline void addSessionRevalidateHeaders(AsyncWebServerResponse* resp, con
     if (etag && etag[0]) {
         resp->addHeader("ETag", etag);
     }
+    resp->addHeader("Connection", "close");
 }
-
-// Не добавляем Connection: close — HTTP/1.1 может переиспользовать TCP для цепочки запросов UI.
 
 static inline bool urlEndsWith(const char* url, const char* suffix) {
     if (!url || !suffix) return false;
@@ -97,21 +144,41 @@ static inline bool sendJsonFromFs(AsyncWebServerRequest* request, const char* pa
     resp->addHeader("Cache-Control", cacheControl ? cacheControl : "no-cache");
     resp->addHeader("Pragma", "no-cache");
     resp->addHeader("Expires", "0");
+    resp->addHeader("Connection", "close");
     request->send(resp);
     return true;
 }
 
-/** `filler(Print&) -> bool`; пишите JSON символами/фрагментами в поток ответа. */
-template <typename F>
-static inline bool sendJsonResponse(AsyncWebServerRequest* request, F&& filler) {
-    AsyncResponseStream* resp = request->beginResponseStream(kContentTypeJson);
-    if (!filler(*resp)) {
-        request->send(500, kContentTypeText, "Failed to generate response");
+/**
+ * Measured JSON body: count with JsonCountingPrint, then beginResponse(len, fill).
+ * `fill` must re-run the same emit via SkippingPrint (stable function pointer; no heap).
+ * Do not use beginResponseStream for JSON.
+ */
+static inline bool sendJsonStreaming(AsyncWebServerRequest* request, JsonEmitFn emit, AwsResponseFiller fill) {
+    if (!request || !emit || !fill) {
+        if (request) request->send(500, kContentTypeText, "Bad JSON stream");
+        return false;
+    }
+    JsonCountingPrint counter;
+    emit(counter);
+    const size_t len = counter.written();
+    if (len == 0) {
+        request->send(500, kContentTypeText, "Empty JSON");
+        return false;
+    }
+    AsyncWebServerResponse* resp = request->beginResponse(kContentTypeJson, len, fill);
+    if (!resp) {
+        request->send(500, kContentTypeText, "Out of memory");
         return false;
     }
     addNoCacheHeaders(resp);
     request->send(resp);
     return true;
+}
+
+/** Same as sendJsonStreaming; kept for call sites that expect sendJsonResponse. */
+static inline bool sendJsonResponse(AsyncWebServerRequest* request, JsonEmitFn emit, AwsResponseFiller fill) {
+    return sendJsonStreaming(request, emit, fill);
 }
 
 static inline void sendBusy(AsyncWebServerRequest* request) {
@@ -130,6 +197,11 @@ static inline bool rejectIfFlashBusy(AsyncWebServerRequest* request) {
 
 static inline void sendJsonSuccess(AsyncWebServerRequest* request) {
     AsyncWebServerResponse* resp = request->beginResponse(200, kContentTypeJson, "{\"success\":true}");
+    if (!resp) {
+        request->send(503, kContentTypeJson, "{\"success\":false,\"error\":\"LOW_MEMORY\"}");
+        return;
+    }
+    resp->addHeader("Connection", "close");
     request->send(resp);
 }
 

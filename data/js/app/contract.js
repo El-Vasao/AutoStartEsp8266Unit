@@ -10,8 +10,11 @@
       status: '/status',
       events: '/events',
       bootstrap: '/bootstrap',
+      /** Deprecated for FE hot path — status comes from SSE baseline only. Kept for debug/compat. */
       bootstrapLive: '/bootstrap/live',
       uiSession: '/ui/session',
+      /** POST after SoftAP UI checklist + settle — allows device GSM/MQTT while SoftAP is up */
+      uiReady: '/ui/ready',
 
       configGet: '/config/get',
       configSave: '/config/save',
@@ -35,6 +38,18 @@
       default: 8000,
       flashCommit: 12000,
       ota: 30000,
+      /** After SoftAP UI checklist, wait before POST /ui/ready (device keeps GSM suspended). */
+      cellularAfterUiQuietMs: 15000,
+      /** Gap after each device HTTP so ESP8266 lwIP can drain (serialized queue). */
+      deviceRequestGapMs: 150,
+      /** Extra pause between init phases (bootstrap → schemas → data → SSE). */
+      initPhaseGapMs: 400,
+      /** After checklist: drain SoftAP TCP before session/EventSource. */
+      sseStartDelayMs: 1500,
+      /** Max wait for mode+hardware while UI stays locked; then degraded unlock. */
+      sseInitDeadlineMs: 12000,
+      /** Alias for startEvents wait (same budget). */
+      ssePanelReadyTimeoutMs: 12000,
     }
   };
 

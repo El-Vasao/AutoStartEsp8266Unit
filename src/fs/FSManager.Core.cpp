@@ -38,6 +38,15 @@ static const FileMetadata fileRegistry[] PROGMEM = {
         0
     },
     {
+        "/app.bundle.js",
+        FilePriority::PRIO_HIGH,
+        FileAccess::ACCESS_READ_ONLY,
+        FileMax::APP_BUNDLE_JS,
+        false,
+        true,
+        0
+    },
+    {
         "/favicon.ico",
         FilePriority::PRIO_NORMAL,
         FileAccess::ACCESS_READ_ONLY,

@@ -110,5 +110,13 @@ MQTT реализован **в прошивке** как неблокирующ�
 
 **3) UI при GSM churn**
 
-- UI и SSE активны во время reconnect/attach.
-- Ожидание: без `wdt reset`; возможен троттлинг логов `[Logger] throttling: ...`.
+- Цель: отложить тяжёлый GSM/MQTT, пока SoftAP-UI в браузере не полностью инициализирован.
+- SoftAP STA associate и тяжёлые HTTP (`/`, assets, `/bootstrap*`, `/config/get`, programs) →
+  `noteHeavyUiTraffic` (clear ready + немедленный suspend). **SSE connect не heavy** — иначе
+  после `/ui/ready` каждый (re)connect сбрасывал ready и GSM оставался IDLE.
+- FE checklist (bootstrap + settings schema + config + program schema) → sleep
+  `CELLULAR_AFTER_UI_QUIET_MS` (15 s) → `POST /ui/ready` → `uiBrowserReady` → Core `service`.
+- Heartbeat `/ui/session` **не** heavy (иначе сбрасывал бы ready).
+- Reload `GET /` снова clear ready + suspend.
+- Пока SoftAP без UI-storm — MQTT на пустом AP допустим. SoftAP down / OTA pressure — suspend.
+- Ожидание: без OOM на first-load; после `/ui/ready` в панели виден живой `gsmState`.

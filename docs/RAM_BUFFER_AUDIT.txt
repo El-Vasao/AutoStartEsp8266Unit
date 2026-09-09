@@ -17,7 +17,8 @@ Purged PoolManager slot:
 
 Tunable library macro (build_flags):
   - SSE_MAX_QUEUED_MESSAGES: caps per-client SSE queue depth in ESPAsyncWebServer (ESP8266).
-    Set to 16 so one incremental SSE tick + several `log` lines stay under the hard discard threshold; was 4 and caused async_ws overflow on connect.
+    Set to 8; soft gate WebSseLimits::SSE_SOFT_QUEUE_MAX=4. UI opens EventSource only after unlock;
+    MAX_SSE_CLIENTS=1. Log SSE requires active UI session.
 
 HTTP POST config/program:
   - Limit HttpPostJson::MAX_BYTES = Limits::CONFIG_JSON_SIZE (4096): protocol cap only.

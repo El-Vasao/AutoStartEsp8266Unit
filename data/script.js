@@ -9,9 +9,7 @@ function isOtaInProgress() {
 }
 
 function initAlpineApp() {
-  // Persist plugin: keep UI tab selection across reloads.
-  // We rely on @alpinejs/persist being bundled before Alpine.
-  const persist = (val, key) => Alpine.$persist(val).as(key);
+  // Tabs are not persisted across reload (always «Панель» + wifi sub-tab).
 
   // settings UI schema + form stores moved to:
   // - data/js/app/stores/settings-ui-schema-store.js
@@ -80,6 +78,11 @@ function initAlpineApp() {
     activeTab: 'panel',
   switchTab(next) {
     const go = () => {
+      try {
+        this.$store.uiState.setActiveTab(next);
+      } catch (e) {
+        this.activeTab = next;
+      }
       this.activeTab = next;
       try {
         if (next === 'programs') this.$store.programs?.loadList?.();
@@ -166,19 +169,22 @@ function initAlpineApp() {
     go();
   },
     init() {
-      this.activeTab = this.$store.uiState.activeTab;
+      // Always open «Панель» on load / refresh (do not restore last main tab).
+      try { this.$store.uiState.setActiveTab('panel'); } catch (e) {
+        try { this.$store.uiState.activeTab = 'panel'; } catch (e2) {}
+      }
+      this.activeTab = 'panel';
 
-      // Двусторонняя синхронизация: если tab меняется программно через store.ui
+      // Двусторонняя синхронизация: programmatic store → local (enter-hook already ran in setActiveTab)
       this.$watch(() => this.$store.uiState.activeTab, v => {
         if (v && v !== this.activeTab) this.activeTab = v;
       });
       this.$watch('activeTab', val => {
-        this.$store.uiState.activeTab = val;
-      });
-
-      // Persist sub-tab selection (clicks in HTML change store.ui.activeSubTab напрямую)
-      this.$watch(() => this.$store.uiState.activeSubTab, v => {
-        // persisted automatically by @alpinejs/persist
+        if (val && val !== this.$store.uiState.activeTab) {
+          try { this.$store.uiState.setActiveTab(val); } catch (e) {
+            this.$store.uiState.activeTab = val;
+          }
+        }
       });
     }
   }));

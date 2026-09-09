@@ -65,8 +65,12 @@ See `platformio.ini` comments: ESP8266 keeps **ESPAsyncWebServer** + **lwIP2 low
 
 ## SSE log dedupe
 
-`WebServerRuntime::broadcastLog` skips sending when the message is **identical to the previous** line (reduces duplicate SSE `log` events and lwIP queue pressure).
+`WebServerRuntime::broadcastLog` skips sending when the message is **identical to the previous** line (reduces duplicate SSE `log` events and lwIP queue pressure). Log SSE also requires an active UI session (same gate as status), not only an EventSource subscriber.
 
 ## SSE queue depth (`SSE_MAX_QUEUED_MESSAGES`)
 
-Build flag in `platformio.ini`: **16** slots per AsyncEventSource client (ESPAsyncWebServer). Below ~8, `runSseIncrementalTick` could enqueue more events than the library hard cap (`E async_ws … overflow`). Connect/disconnect use `logSerialOnly` so handshake does not push an extra `log` event into the same queue. A short `yield()` before the burst lets lwIP drain the queue between loop iterations.
+Build flag in `platformio.ini`: **8** slots per AsyncEventSource client (ESPAsyncWebServer). Soft app gate: `WebSseLimits::SSE_SOFT_QUEUE_MAX = 4`. Status tick interval: `Timing::SSE_STATUS_INTERVAL_MS = 1000`. Max SSE clients: `WebSseLimits::MAX_SSE_CLIENTS = 1`. UI defers `EventSource` until after unlock to avoid overlapping bootstrap/schema HTTP with SSE accept. Connect/disconnect use `logSerialOnly` so handshake does not push an extra `log` event into the same queue. A short `yield()` before the incremental burst lets lwIP drain the queue between loop iterations.
+
+Expected RAM win vs prior (queue 16 / soft 8 / tick 500 ms / early EventSource): about **2–4 KB** peak with UI open; idle SoftAP largely unchanged.
+
+`MemorySlo::MIN_HEAP_FOR_SSE_SEND` is **4500** and `/bootstrap` lite/live gate **5500**. Gate runs after the HTTP request is already allocated (~2–3 KB); it reserves send-path headroom, not SoftAP+TCP from scratch and not a body cbuf. Field: one SoftAP `/bootstrap` leaves ~6900 free — a 7000 gate rejected before emit. JSON uses measured filler (`sendJsonStreaming`), not `AsyncResponseStream`. Panel seeds `deviceStatus.loaded` from lite `/bootstrap` so it does not stick on «Загрузка данных…» while SSE is gated.

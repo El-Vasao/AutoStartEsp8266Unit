@@ -83,6 +83,9 @@ Current module budgets (baseline target for `normal_full`):
 Stage A (now): protect accept-path and first connect.
 Stage A.1 (now): prevent bootstrap request storms (`single-flight`, `LOW_MEMORY` backoff, `/bootstrap/live` throttle).
 
+Stage A.2 (now): SSE pressure cut without stack swap — `SSE_MAX_QUEUED_MESSAGES=8`, soft queue 4,
+status tick 1000 ms, `MAX_SSE_CLIENTS=1`, log SSE only with active UI session, EventSource after UI unlock.
+
 Stage B: move cold-path config fields out of always-resident runtime structures (FS-backed fetch on demand).
 
 Stage C: evaluate `ESPAsyncWebServer` fork/patch only if memory SLO still fails after Stage A/B.

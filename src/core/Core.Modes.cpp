@@ -214,10 +214,62 @@ void Core::handleNormal() {
     impl.triggerManager.update();
     impl.batterySaverManager.update();
     impl.thermostatManager.update();
+    // Cellular vs SoftAP UI init:
+    // Goal: defer heavy GSM/MQTT until SoftAP browser UI is fully initialized.
+    // - SoftAP STA 0→1 and heavy HTTP (not SSE connect) → immediate suspend (noteHeavyUiTraffic).
+    // - FE checklist + settle → POST /ui/ready → uiBrowserReady → service.
+    // - SoftAP down: clear marks; suspend until SoftAP up again or NORMAL_SILENT services.
     if (impl.otaUploadPressureActive) {
+        if (impl.cellularUiDeferSinceMs != 0) {
+            impl.cellularUiDeferSinceMs = 0;
+            impl.cellularUiDeferLastLogMs = 0;
+            logger.log("[Core] cellular defer cleared (ota pressure)\n");
+        }
         suspendCellularLink();
     } else {
-        serviceCellularLink();
+        const uint32_t nowMs = millis();
+        const bool apUp = webServer.isActive();
+        const uint8_t sta = apUp ? WiFi.softAPgetStationNum() : 0;
+
+        if (!apUp) {
+            impl.prevSoftApSta = 0;
+            if (impl.cellularUiDeferSinceMs != 0) {
+                impl.cellularUiDeferSinceMs = 0;
+                impl.cellularUiDeferLastLogMs = 0;
+            }
+            webServer.clearHeavyUiTraffic();
+            suspendCellularLink();
+        } else {
+            if (impl.prevSoftApSta == 0 && sta >= 1) {
+                logger.log("[Core] SoftAP STA joined — defer cellular for UI init (heap=%u)\n",
+                           (unsigned)ESP.getFreeHeap());
+                webServer.noteHeavyUiTraffic();
+            }
+            impl.prevSoftApSta = sta;
+
+            // SoftAP up: allow cellular only if UI never started loading, or FE posted /ui/ready.
+            const bool uiReady = webServer.uiBrowserReady();
+            const bool uiStorm = (webServer.lastHeavyUiMs() != 0);
+            if (uiReady || !uiStorm) {
+                if (impl.cellularUiDeferSinceMs != 0) {
+                    impl.cellularUiDeferSinceMs = 0;
+                    impl.cellularUiDeferLastLogMs = 0;
+                    logger.log("[Core] cellular resumed (%s)\n",
+                               uiReady ? "UI browser-ready" : "softap idle no UI");
+                }
+                serviceCellularLink();
+            } else {
+                if (impl.cellularUiDeferSinceMs == 0) {
+                    impl.cellularUiDeferSinceMs = nowMs ? nowMs : 1;
+                    impl.cellularUiDeferLastLogMs = nowMs;
+                } else if ((nowMs - impl.cellularUiDeferLastLogMs) >= NetTiming::CELLULAR_UI_BOOTSTRAP_DEFER_LOG_MS) {
+                    impl.cellularUiDeferLastLogMs = nowMs;
+                    logger.log("[Core] cellular still deferred (ui not ready sta=%u heap=%u)\n",
+                               (unsigned)sta, (unsigned)ESP.getFreeHeap());
+                }
+                suspendCellularLink();
+            }
+        }
     }
 
     const auto& wcfg = config.getBase().wifi;

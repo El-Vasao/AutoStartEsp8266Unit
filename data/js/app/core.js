@@ -1,38 +1,50 @@
-// App bootstrap: registers alpine:init listener before Alpine core runs.
+// SoftAP UI init: HTTP checklist, then wait SSE panel-ready; hard safety unlock if hung.
 (function () {
   document.addEventListener('alpine:init', () => {
     try {
       window.APP?.stores?.init?.(window.Alpine);
       window.APP?.gestures?.init?.(window.Alpine);
 
-      // UI_SCHEMA + config are loaded via HTTP. Hardware limits arrive via /bootstrap and are updated via SSE.
-      // Keep UI locked until schema+settings+programSchema are ready; SSE starts after minimal bootstrap.
       (async () => {
         const Alpine = window.Alpine;
         const log = window.APP?.utils?.log;
+        const timeouts = window.APP?.contract?.api?.timeoutsMs || {};
+        const phaseGapMs = Number(timeouts.initPhaseGapMs) || 400;
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        // Longer than checklist + sseInitDeadlineMs so normal SSE-wait UX is not cut short.
+        const SAFETY_UNLOCK_MS = 20000;
 
-        let unlocked = false;
+        let finished = false;
+        let safetyTimer = null;
         const ui = () => {
           try { return Alpine?.store?.('uiState'); } catch (e) { return null; }
         };
         const setPhase = (p) => {
           try { ui()?.setInitPhase?.(p); } catch (e) {}
         };
+        const setProgress = (pct, label) => {
+          try { ui()?.setInitProgress?.(pct, label); } catch (e) {}
+        };
         const pushReason = (code, detail) => {
           try { ui()?.pushInitReason?.(code, detail); } catch (e) {}
         };
-        const unlock = () => {
-          if (unlocked) return;
-          unlocked = true;
-          try { Alpine.store('uiState').locked = false; } catch (e) {}
+        const clearSafety = () => {
+          if (safetyTimer) {
+            clearTimeout(safetyTimer);
+            safetyTimer = null;
+          }
+        };
+        const unlock = (opts) => {
+          if (finished) return;
+          finished = true;
+          clearSafety();
+          try { ui()?.unlock?.(opts); } catch (e) {}
         };
         const failInit = (message, phase = 'degraded') => {
-          try {
-            Alpine.store('uiState').initFailed = true;
-            Alpine.store('uiState').initError = String(message || 'Ошибка инициализации UI.');
-            setPhase(phase);
-          } catch (e) {}
-          unlock();
+          if (finished) return;
+          finished = true;
+          clearSafety();
+          try { ui()?.failInit?.(message, phase); } catch (e) {}
         };
         const hasValidBootstrap = () => {
           try {
@@ -43,19 +55,7 @@
           }
         };
 
-        try { Alpine.store('uiState').locked = true; } catch (e) {}
-        try {
-          const s = Alpine.store('uiState');
-          s.initFailed = false;
-          s.initError = '';
-          s.initReasons = [];
-          s.setInitPhase?.('starting');
-        } catch (e) {}
-
-        const timeoutMs = 6500;
-        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-        const withTimeout = async (p, ms = timeoutMs) => {
-          // Never throw from here: bootstrap is best-effort and must keep progressing.
+        const withTimeout = async (p, ms = 6500) => {
           let t = null;
           try {
             return await Promise.race([
@@ -68,9 +68,84 @@
             if (t) clearTimeout(t);
           }
         };
+        const phaseGap = async () => { await sleep(phaseGapMs); };
 
-        // Phase: minimal bootstrap (/bootstrap)
+        async function postUiReady(sessionId) {
+          const readyUrl = window.APP?.api?.endpoints?.uiReady
+            || window.APP?.contract?.api?.endpoints?.uiReady
+            || '/ui/ready';
+          const body = new URLSearchParams();
+          body.set('id', String(sessionId));
+          const deviceFetch = window.APP?.api?.deviceFetch;
+          const res = deviceFetch
+            ? await deviceFetch(readyUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                body: body.toString()
+              })
+            : await fetch(readyUrl, {
+                method: 'POST',
+                cache: 'no-store',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                  'X-Requested-With': 'ElLineUI'
+                },
+                body: body.toString()
+              });
+          if (!res || !res.ok) pushReason('ui_ready_failed', `status=${res && res.status}`);
+          return !!(res && res.ok);
+        }
+
+        function startSseBackgroundOnly(bootstrapUiLease) {
+          // Used when UI already unlocked/failed — still need EventSource + /ui/ready.
+          try { window.APP?.sse?.init?.(Alpine); } catch (e) { pushReason('sse_init_failed', e?.message || e); }
+          try { if (bootstrapUiLease) window.APP?.sse?.configureHeartbeat?.(bootstrapUiLease); } catch (e) {}
+          const quietMs = Number(timeouts.cellularAfterUiQuietMs) || 15000;
+          const sseDelayMs = Number(timeouts.sseStartDelayMs) || 1500;
+          const deadlineMs = Number(timeouts.sseInitDeadlineMs) || 12000;
+          const startedAt = Date.now();
+          (async () => {
+            try {
+              await sleep(sseDelayMs);
+              if (typeof window.APP?.sse?.startEvents === 'function') {
+                const ok = await window.APP.sse.startEvents({ timeoutMs: deadlineMs });
+                if (!ok) pushReason('sse_panel_timeout', 'mode/hardware not received (background)');
+              }
+            } catch (e) {
+              pushReason('sse_start_failed', e?.message || e);
+            }
+            try {
+              const elapsed = Date.now() - startedAt;
+              await sleep(Math.max(0, quietMs - elapsed));
+              if (!window.APP?.sse?.isConnected?.()) {
+                pushReason('ui_ready_skipped', 'SSE not connected after quiet');
+              } else if (!hasValidBootstrap()) {
+                pushReason('ui_ready_skipped', 'bootstrap invalid');
+              } else {
+                const sessionId = window.APP?.uiSessionId || window.APP?.sse?._ctx?.uiSessionId;
+                if (!sessionId) pushReason('ui_ready_no_session', 'missing uiSessionId');
+                else await postUiReady(sessionId);
+              }
+            } catch (e) {
+              pushReason('ui_ready_exception', e?.message || e);
+            }
+          })().catch((e) => pushReason('sse_bg_exception', e?.message || e));
+        }
+
+        try { ui()?.beginInit?.(); } catch (e) {}
+
+        // Hard safety if HTTP/SSE path hangs (F5 SoftAP). Longer than normal checklist+SSE wait.
+        safetyTimer = setTimeout(() => {
+          if (finished) return;
+          pushReason('init_safety_unlock', `forced after ${SAFETY_UNLOCK_MS}ms`);
+          unlock({ degraded: true });
+        }, SAFETY_UNLOCK_MS);
+
+        let bootstrapUiLease = null;
+
+        // --- bootstrap ---
         setPhase('bootstrap');
+        setProgress(8, 'Bootstrap…');
         try {
           const apiJson = window.APP?.api?.apiJson;
           const isLowMemoryResponse = window.APP?.api?.isLowMemoryResponse;
@@ -84,106 +159,118 @@
             return bootstrapState.inFlight;
           };
           const retryDelayMs = (attempt, lowMem) => {
-            if (lowMem) return Math.min(12000, 1200 * (1 << Math.min(attempt, 3)));
-            return 180 + attempt * 240;
+            if (lowMem) return Math.min(12000, 1500 * (1 << Math.min(attempt, 3)));
+            return 400 + attempt * 350;
           };
           let ok = false;
           for (let i = 0; i < 6; i++) {
+            if (finished) break;
+            setProgress(10 + i * 2, `Bootstrap (попытка ${i + 1})…`);
             const res = await runBootstrapRequest();
             if (res?.__timeout) pushReason('bootstrap_timeout', `attempt=${i + 1}`);
             if (res?.__error) pushReason('bootstrap_error', res.__error?.message || res.__error);
             if (res?.ok) {
               ok = true;
               Alpine.store('deviceStatus')?.applyBootstrap?.(res.data);
-              try { window.APP?.sse?.configureHeartbeat?.(res.data?.uiLease); } catch (e) {}
+              bootstrapUiLease = res.data?.uiLease || null;
               break;
             }
             const lowMem = !!isLowMemoryResponse?.(res);
             if (lowMem) pushReason('bootstrap_low_memory', `attempt=${i + 1}`);
             await sleep(retryDelayMs(i, lowMem));
           }
-          if (!ok) pushReason('bootstrap_unavailable', 'GET /bootstrap failed');
-
-          // Safety-first: without bootstrap hwMap/hwCounts, UI must not operate.
-          if (!ok || !hasValidBootstrap()) {
-            failInit('Не удалось загрузить bootstrap (/bootstrap). UI заблокирован.');
+          if (finished) {
+            startSseBackgroundOnly(bootstrapUiLease);
             return;
+          }
+          if (!ok || !hasValidBootstrap()) {
+            pushReason('bootstrap_unavailable', 'GET /bootstrap failed');
+            failInit('Не удалось загрузить bootstrap (/bootstrap). UI заблокирован.');
+          } else {
+            setProgress(28, 'Bootstrap готов');
           }
         } catch (e) {
           pushReason('bootstrap_exception', e?.message || e);
           failInit('Не удалось загрузить bootstrap. UI заблокирован.');
+        }
+
+        if (Alpine.store('uiState')?.initFailed || finished) {
+          startSseBackgroundOnly(bootstrapUiLease);
           return;
         }
 
-        // Start SSE only after minimal bootstrap attempt, so required stores are present.
-        try { window.APP?.sse?.init?.(Alpine); } catch (e) { pushReason('sse_init_failed', e?.message || e); }
-
-        // Phase: schemas + validators
+        await phaseGap();
+        if (finished) { startSseBackgroundOnly(bootstrapUiLease); return; }
         setPhase('schemas');
-        // A few retries help on ESP8266 (radio + lwIP buffers + first-load spikes).
+        setProgress(35, 'Схема настроек…');
         try {
-          let ok = false;
           for (let i = 0; i < 3; i++) {
-            const r = await withTimeout(Alpine.store('settingsUiSchema')?.load?.(), 6500);
-            if (r?.__timeout) pushReason('settings_schema_timeout', `attempt=${i + 1}`);
-            if (r?.__error) pushReason('settings_schema_error', r.__error?.message || r.__error);
-            if (Alpine.store('settingsUiSchema')?.loaded) { ok = true; break; }
-            await sleep(140 + i * 220);
+            if (finished) break;
+            await withTimeout(Alpine.store('settingsUiSchema')?.load?.(), 6500);
+            if (Alpine.store('settingsUiSchema')?.loaded) break;
+            await sleep(200 + i * 250);
           }
-          if (!ok) pushReason('settings_schema_missing', 'settingsUiSchema not loaded');
+          if (!Alpine.store('settingsUiSchema')?.loaded) pushReason('settings_schema_missing', 'settingsUiSchema not loaded');
         } catch (e) { pushReason('settings_schema_exception', e?.message || e); }
 
-        // Validation schema (Ajv) - best-effort for UI, but required for writes (enforced elsewhere).
+        await phaseGap();
+        if (finished) { startSseBackgroundOnly(bootstrapUiLease); return; }
+        setProgress(42, 'Валидатор настроек…');
         try {
           for (let i = 0; i < 2; i++) {
-            const r = await withTimeout(Alpine.store('settingsValidator')?.load?.(), 6500);
-            if (r?.__timeout) pushReason('settings_validator_timeout', `attempt=${i + 1}`);
-            if (r?.__error) pushReason('settings_validator_error', r.__error?.message || r.__error);
+            if (finished) break;
+            await withTimeout(Alpine.store('settingsValidator')?.load?.(), 6500);
             if (Alpine.store('settingsValidator')?.loaded) break;
-            await sleep(80 + i * 120);
+            await sleep(150 + i * 200);
           }
         } catch (e) { pushReason('settings_validator_exception', e?.message || e); }
 
-        // Phase: data (config + program editor schema + programs list)
+        await phaseGap();
+        if (finished) { startSseBackgroundOnly(bootstrapUiLease); return; }
         setPhase('data');
+        setProgress(52, 'Конфигурация…');
         try {
-          let ok = false;
-          for (let i = 0; i < 3; i++) {
-            const r = await withTimeout(Alpine.store('settings')?.load?.(true), 6500);
-            if (r?.__timeout) pushReason('settings_load_timeout', `attempt=${i + 1}`);
-            if (r?.__error) pushReason('settings_load_error', r.__error?.message || r.__error);
-            if (Alpine.store('settings')?.loaded) { ok = true; break; }
-            await sleep(220 + i * 320);
+          for (let i = 0; i < 4; i++) {
+            if (finished) break;
+            await withTimeout(Alpine.store('settings')?.load?.(true), 8000);
+            if (Alpine.store('settings')?.loaded) break;
+            await sleep(350 + i * 400);
           }
-          if (!ok) pushReason('settings_missing', 'settings not loaded');
+          if (!Alpine.store('settings')?.loaded) pushReason('settings_missing', 'settings not loaded');
         } catch (e) { pushReason('settings_exception', e?.message || e); }
 
-        // Program steps schema (editor metadata)
+        await phaseGap();
+        if (finished) { startSseBackgroundOnly(bootstrapUiLease); return; }
+        setProgress(62, 'Схема программ…');
         try {
-          let ok = false;
           for (let i = 0; i < 3; i++) {
-            const r = await withTimeout(Alpine.store('programStepsUiSchema')?.load?.(), 6500);
-            if (r?.__timeout) pushReason('program_steps_schema_timeout', `attempt=${i + 1}`);
-            if (r?.__error) pushReason('program_steps_schema_error', r.__error?.message || r.__error);
-            if (Alpine.store('programStepsUiSchema')?.loaded) { ok = true; break; }
-            await sleep(160 + i * 240);
+            if (finished) break;
+            await withTimeout(Alpine.store('programStepsUiSchema')?.load?.(), 6500);
+            if (Alpine.store('programStepsUiSchema')?.loaded) break;
+            await sleep(200 + i * 250);
           }
-          if (!ok) pushReason('program_steps_schema_missing', 'programStepsUiSchema not loaded');
+          if (!Alpine.store('programStepsUiSchema')?.loaded) pushReason('program_steps_schema_missing', 'programStepsUiSchema not loaded');
         } catch (e) { pushReason('program_steps_schema_exception', e?.message || e); }
 
-        // Programs index early-load (used across UI: program names, selectors, etc.)
+        await phaseGap();
+        if (finished) { startSseBackgroundOnly(bootstrapUiLease); return; }
+        setProgress(70, 'Список программ…');
         try {
           for (let i = 0; i < 3; i++) {
-            const r = await withTimeout(Alpine.store('programs')?.loadList?.(true), 6500);
-            if (r?.__timeout) pushReason('programs_list_timeout', `attempt=${i + 1}`);
-            if (r?.__error) pushReason('programs_list_error', r.__error?.message || r.__error);
+            if (finished) break;
+            await withTimeout(Alpine.store('programs')?.loadList?.(true), 8000);
             if (Alpine.store('programs')?.loaded) break;
-            await sleep(200 + i * 260);
+            await sleep(300 + i * 350);
           }
         } catch (e) { pushReason('programs_list_exception', e?.message || e); }
 
-        // Decide ready vs degraded
-        try {
+        if (finished) {
+          startSseBackgroundOnly(bootstrapUiLease);
+          return;
+        }
+
+        let initOk = false;
+        {
           const schemaOk = !!Alpine.store('settingsUiSchema')?.loaded;
           const settingsOk = !!Alpine.store('settings')?.loaded;
           const progSchemaOk = !!Alpine.store('programStepsUiSchema')?.loaded;
@@ -194,24 +281,79 @@
                     : (!settingsOk ? 'Не удалось загрузить конфигурацию.' : 'Не удалось загрузить схему редактора программ.'));
             failInit(msg);
           } else {
-            setPhase('ready');
+            setPhase('checklist');
+            setProgress(78, 'Чеклист готов');
+            initOk = true;
           }
-        } catch (e) {
-          pushReason('init_finalize_exception', e?.message || e);
-          failInit('Ошибка инициализации UI.');
         }
 
         try {
-          // Surface a compact hint to console for diagnostics (does not affect UX).
           const s = Alpine.store('uiState');
           if (s?.initReasons?.length) log?.warn?.('[init] reasons:', s.initReasons);
         } catch (e) {}
 
-        unlock();
+        if (!initOk || Alpine.store('uiState')?.initFailed || finished) {
+          startSseBackgroundOnly(bootstrapUiLease);
+          return;
+        }
+
+        // --- SSE: keep lock until panel-ready (or deadline / safety) ---
+        await phaseGap();
+        if (finished) { startSseBackgroundOnly(bootstrapUiLease); return; }
+        setPhase('sse');
+        setProgress(82, 'Подключение SSE…');
+        try { window.APP?.sse?.init?.(Alpine); } catch (e) { pushReason('sse_init_failed', e?.message || e); }
+        try { if (bootstrapUiLease) window.APP?.sse?.configureHeartbeat?.(bootstrapUiLease); } catch (e) {}
+
+        const quietMs = Number(timeouts.cellularAfterUiQuietMs) || 15000;
+        const sseDelayMs = Number(timeouts.sseStartDelayMs) || 1500;
+        const deadlineMs = Number(timeouts.sseInitDeadlineMs) || 12000;
+        const startedAt = Date.now();
+
+        await sleep(sseDelayMs);
+        if (finished) return;
+
+        setProgress(86, 'Ждём статус устройства…');
+        let panelReady = false;
+        try {
+          if (typeof window.APP?.sse?.startEvents !== 'function') {
+            pushReason('sse_start_failed', 'startEvents missing');
+          } else {
+            panelReady = !!(await window.APP.sse.startEvents({ timeoutMs: deadlineMs }));
+            if (!panelReady) pushReason('sse_panel_timeout', 'mode/hardware not received within deadline');
+          }
+        } catch (e) {
+          pushReason('sse_start_failed', e?.message || e);
+        }
+
+        if (finished) return;
+
+        if (!panelReady) {
+          pushReason('sse_panel_timeout_unlock', 'unlocking without panel-ready');
+          unlock({ degraded: true });
+        } else {
+          setProgress(100, 'Готово');
+          unlock();
+        }
+
+        try {
+          const elapsed = Date.now() - startedAt;
+          await sleep(Math.max(0, quietMs - elapsed));
+          if (!window.APP?.sse?.isConnected?.()) {
+            pushReason('ui_ready_skipped', 'SSE not connected after quiet');
+          } else if (!hasValidBootstrap()) {
+            pushReason('ui_ready_skipped', 'bootstrap invalid');
+          } else {
+            const sessionId = window.APP?.uiSessionId || window.APP?.sse?._ctx?.uiSessionId;
+            if (!sessionId) pushReason('ui_ready_no_session', 'missing uiSessionId');
+            else await postUiReady(sessionId);
+          }
+        } catch (e) {
+          pushReason('ui_ready_exception', e?.message || e);
+        }
       })();
     } catch (e) {
       window.APP?.utils?.log?.error?.('bootstrap failed', e);
     }
   });
 })();
-

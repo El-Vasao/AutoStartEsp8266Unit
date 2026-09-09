@@ -118,6 +118,8 @@ static FlashCommitOp gLastFlashOp{FlashCommitOp::NONE};
 static bool gLastFlashPending{false};
 static bool gLastFlashOk{true};
 static uint32_t gLastFlashMillisVal{0};
+/// After SSE connect: emit clocks→mode→gsm→hardware one-per-tick (avoid AsyncSSE queue flood).
+static uint8_t gBaselineStep{0}; // 0=idle/done, 1=clocks, 2=mode, 3=gsm, 4=hardware
 
 static void invalidateDedupState() {
     gLastHardwareHash = 0;
@@ -130,6 +132,13 @@ static void invalidateDedupState() {
     gLastFlashPending = false;
     gLastFlashOk = true;
     gLastFlashMillisVal = 0;
+}
+
+/// New SSE client: clear dedup and pace baseline across ticks (no HTTP live required).
+static void requestBaselineResync() {
+    invalidateDedupState();
+    gLastClkMsSent = 0;
+    gBaselineStep = 1;
 }
 
 /** True if another SSE enqueue this tick is unlikely to hit ESPAsync hard queue discard. */
@@ -426,6 +435,13 @@ static void emitClocksPayload(Print& p) {
     commaOut(p, &c);
     p.print("\"programRunning\":");
     p.print(prog ? "true" : "false");
+    commaOut(p, &c);
+    p.print("\"freeHeap\":");
+    p.print(static_cast<unsigned long>(ESP.getFreeHeap()));
+    commaOut(p, &c);
+    p.print("\"lastError\":\"");
+    escapeJsonString(p, core.getErrorManager().getMessage());
+    p.print('"');
     p.print('}');
 }
 
@@ -575,47 +591,16 @@ void emitSnapshotPayload(Print& p) {
     p.print('}');
 }
 
-static void captureDedupSnapshotFromWire() {
-    strlcpy(gLastMode, core.getModeName(), sizeof(gLastMode));
-    strlcpy(gLastGsm, core.getGSM().getStateString(), sizeof(gLastGsm));
-    strlcpy(gLastErr, core.getErrorManager().getMessage(), sizeof(gLastErr));
-
-    {
-        PayloadPrint hp;
-        emitHardwarePayload(hp);
-        if (!hp.truncated() && hp.length() && hp.seal())
-            gLastHardwareHash = fnv1a32(reinterpret_cast<const uint8_t*>(gSsePayload), hp.length());
-    }
-    {
-        PayloadPrint rp;
-        emitRuntimePayload(rp);
-        if (!rp.truncated() && rp.length() && rp.seal())
-            gLastRuntimeHash = fnv1a32(reinterpret_cast<const uint8_t*>(gSsePayload), rp.length());
-    }
-    {
-        PayloadPrint pp;
-        emitProgramPayload(pp);
-        if (!pp.truncated() && pp.length() && pp.seal())
-            gLastProgramHash = fnv1a32(reinterpret_cast<const uint8_t*>(gSsePayload), pp.length());
-    }
-
-    gLastFlashPending = flashCommit.isPending();
-    gLastFlashOp = flashCommit.getLastFlashOp();
-    gLastFlashOk = flashCommit.getLastFlashOk();
-    gLastFlashMillisVal = flashCommit.getLastFlashMillis();
-}
-
-/// Force/resync: тонкое SSE-событие — клиент повторит GET /bootstrap для `live` (меньше RAM/очередь, чем snapshot по SSE).
+/// Force status: pace baseline re-emit (same path as new SSE client). No HTTP live required.
 static void broadcastResync(WebServer& ws, size_t maxQueueDepth) {
+    (void)maxQueueDepth;
     if (!WebServerRuntime::sseActiveUiOk(ws)) return;
     if (WebServerRuntime::refreshSseClientCount(ws) == 0) return;
-    if (WebServerRuntime::sseQueueBackpressureAtLeast(ws, maxQueueDepth)) return;
-    if (!sseTickMoreEventsSafe(ws)) return;
-
-    WebServerRuntime::sseSendEvent(ws, "{}", "resync", millis());
-
-    invalidateDedupState();
-    captureDedupSnapshotFromWire();
+    // Optional signal; FE must not fetch /bootstrap/live on this.
+    if (sseTickMoreEventsSafe(ws) && !WebServerRuntime::sseQueueBackpressureAtLeast(ws, WebSseLimits::STATUS_QUEUE_MAX)) {
+        WebServerRuntime::sseSendEvent(ws, "{}", "resync", millis());
+    }
+    requestBaselineResync();
 }
 
 static void runSseIncrementalTick(WebServer& ws, uint32_t now) {
@@ -627,6 +612,68 @@ static void runSseIncrementalTick(WebServer& ws, uint32_t now) {
 
     // Разгрузить lwIP/AsyncTCP перед пачкой `events.send` (снижает async_ws overflow на ESP8266).
     yield();
+
+    // Paced baseline after connect: at most one important event per tick.
+    if (gBaselineStep >= 1 && gBaselineStep <= 4) {
+        if (!sseTickMoreEventsSafe(ws)) return;
+        if (gBaselineStep == 1) {
+            gLastClkMsSent = now;
+            PayloadPrint cp;
+            emitClocksPayload(cp);
+            if (sendJsonEvent(ws, "clocks", cp, statusQueueMax)) {
+                gBaselineStep = 2;
+            }
+            return;
+        }
+        if (gBaselineStep == 2) {
+            const char* curMode = core.getModeName();
+            PayloadPrint mp;
+            mp.print('{');
+            bool cm = false;
+            commaOut(mp, &cm);
+            mp.print("\"mode\":\"");
+            escapeJsonString(mp, curMode);
+            mp.print('"');
+            mp.print('}');
+            if (sendJsonEvent(ws, "mode", mp, statusQueueMax)) {
+                strlcpy(gLastMode, curMode, sizeof(gLastMode));
+                gBaselineStep = 3;
+            }
+            return;
+        }
+        if (gBaselineStep == 3) {
+            const char* curGsm = core.getGSM().getStateString();
+            PayloadPrint gp;
+            gp.print('{');
+            bool cg = false;
+            commaOut(gp, &cg);
+            gp.print("\"gsmState\":\"");
+            escapeJsonString(gp, curGsm);
+            gp.print('"');
+            gp.print('}');
+            if (sendJsonEvent(ws, "gsm", gp, statusQueueMax)) {
+                strlcpy(gLastGsm, curGsm, sizeof(gLastGsm));
+                gBaselineStep = 4;
+            }
+            return;
+        }
+        // step 4: hardware
+        {
+            PayloadPrint hp;
+            emitHardwarePayload(hp);
+            if (!hp.truncated() && hp.length() && hp.seal()) {
+                const uint32_t h = fnv1a32(reinterpret_cast<const uint8_t*>(gSsePayload), hp.length());
+                if (WebServerRuntime::sseSoftQueueAllowsSend(ws, statusQueueMax)) {
+                    WebServerRuntime::sseSendEvent(ws, gSsePayload, "hardware", millis());
+                    gLastHardwareHash = h;
+                    gBaselineStep = 0;
+                }
+            } else {
+                gBaselineStep = 0; // skip if truncated; normal path may retry later
+            }
+        }
+        return;
+    }
 
     // Clocks: ~1 Hz — лёгкий keepalive для EventSource stale detector.
     if (gLastClkMsSent == 0 || (uint32_t)(now - gLastClkMsSent) >= Timing::SSE_CLOCKS_INTERVAL_MS) {
@@ -754,6 +801,11 @@ void WebServerRuntime::emitLiveSnapshotJson(Print& p) {
 
 void WebServerRuntime::broadcastStatusForce(WebServer& ws) {
     sse_inc_detail::broadcastResync(ws, WebSseLimits::STATUS_FORCE_QUEUE_MAX);
+}
+
+void WebServerRuntime::requestSseIncrementalBaseline(WebServer& ws) {
+    (void)ws;
+    sse_inc_detail::requestBaselineResync();
 }
 
 void WebServerRuntime::sendStatus(WebServer& ws, size_t maxQueueDepth) {

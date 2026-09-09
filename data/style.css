@@ -611,6 +611,21 @@ input:checked + .slider:before {
     color: var(--text-muted);
     font-size: 0.92rem;
 }
+.ui-progress {
+    margin-top: 12px;
+    text-align: left;
+}
+.init-card .ui-progress,
+.modal-card .ui-progress {
+    margin-top: 12px;
+    margin-bottom: 4px;
+}
+.modal-card .ui-progress .progress-text {
+    text-align: center;
+}
+.init-card .ui-progress .progress-text {
+    text-align: center;
+}
 
 /* ====================================================
    Основные вкладки
@@ -693,6 +708,9 @@ input:checked + .slider:before {
     cursor: not-allowed;
 }
 
+/* Visibility contract: ONLY .active toggles display.
+   Do NOT also put Alpine x-show on these panes — x-show stores the CSS
+   display:none as "original" and restores it as an inline style that beats .active. */
 .settings-subtab-pane {
     display: none;
 }

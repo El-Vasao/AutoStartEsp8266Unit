@@ -49,7 +49,7 @@
         try {
           const ui = Alpine.store('uiState');
           const settings = Alpine.store('settings');
-          ui.activeTab = 'settings';
+          ui.setActiveTab('settings');
           await settings.load();
 
           const ids = APP.domIds?.settings || {};

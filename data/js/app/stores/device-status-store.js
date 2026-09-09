@@ -67,6 +67,37 @@
         return this.tempSensors.some(s => !!s && s.valid);
       },
 
+      /** Settings/panel inventory size: prefer locked hwCounts from lite /bootstrap. */
+      get sensorSlots() {
+        if (this.hwCounts?.locked) return Number(this.hwCounts.sensors) || 0;
+        return Array.isArray(this.tempSensors) ? this.tempSensors.length : 0;
+      },
+      get inputSlots() {
+        if (this.hwCounts?.locked) return Number(this.hwCounts.inputs) || 0;
+        return Array.isArray(this.inputs) ? this.inputs.length : 0;
+      },
+      get relaySlots() {
+        if (this.hwCounts?.locked) return Number(this.hwCounts.relays) || 0;
+        return Array.isArray(this.relays) ? this.relays.length : 0;
+      },
+
+      _seedInventoryTiles() {
+        const nRelays = this.hwCounts?.relays || (Array.isArray(this.hwMap?.relays) ? this.hwMap.relays.length : 0);
+        const nInputs = this.hwCounts?.inputs || (Array.isArray(this.hwMap?.inputs) ? this.hwMap.inputs.length : 0);
+        const nSensors = this.hwCounts?.sensors || 0;
+        if (!Array.isArray(this.relays) || this.relays.length !== nRelays) {
+          this.relays = Array.from({ length: nRelays }, () => false);
+        }
+        if (!Array.isArray(this.inputs) || this.inputs.length !== nInputs) {
+          this.inputs = Array.from({ length: nInputs }, () => false);
+          this.inputFrequencies = Array.from({ length: nInputs }, () => null);
+          this.inputsEnabled = Array.from({ length: nInputs }, () => true);
+        }
+        if (!Array.isArray(this.tempSensors) || this.tempSensors.length !== nSensors) {
+          this.tempSensors = Array.from({ length: nSensors }, () => ({ id: null, valid: false, t: null, lastMs: 0 }));
+        }
+      },
+
       _clockTimer: null,
       _clockBaseline: { atPerf: 0, uptime: 0, timerRemaining: 0, programRunning: false },
 
@@ -133,11 +164,13 @@
                 APP.utils.LS.del('otaInProgress');
                 if (APP.utils.LS.get('otaPostRebootGoPanel') === '1') {
                   APP.utils.LS.del('otaPostRebootGoPanel');
-                  Alpine.store('uiState').activeTab = 'panel';
+                  Alpine.store('uiState').setActiveTab('panel');
                   Alpine.store('uiStatusBar').flash('Обновление завершено.', 'success', 5000);
                 }
               }
             }
+            if (data.freeHeap !== undefined) this.freeHeap = data.freeHeap;
+            if (Object.prototype.hasOwnProperty.call(data, 'lastError')) this.lastError = data.lastError || '—';
             this._applyClockBaseline(data.uptime, data.timerRemaining, data.programRunning);
             this.startClockExtrapolation();
             break;
@@ -196,6 +229,10 @@
         }
         if (data.hwMap && typeof data.hwMap === 'object') this.hwMap = data.hwMap;
         if (Array.isArray(data.temperatureSensorRoms)) this.temperatureSensorRoms = data.temperatureSensorRoms;
+        // Lite /bootstrap has no live snapshot — seed tiles/slots from hwCounts so settings/panel
+        // are not empty while waiting for SSE hardware (esp. tempSensors used to stay []).
+        this._seedInventoryTiles();
+        this.loaded = true;
         if (data.live && typeof data.live === 'object') this.patchFromSse('snapshot', data.live);
       },
 
@@ -212,30 +249,37 @@
 
             if (APP.utils.LS.get('otaPostRebootGoPanel') === '1') {
               APP.utils.LS.del('otaPostRebootGoPanel');
-              Alpine.store('uiState').activeTab = 'panel';
+              Alpine.store('uiState').setActiveTab('panel');
               Alpine.store('uiStatusBar').flash('Обновление завершено.', 'success', 5000);
             }
           }
         }
-        this.mode = data.mode || '—';
-        this.uptime = data.uptime || 0;
+        // Incomplete snapshot must not wipe lite-bootstrap seeds (mode «—», empty tiles).
+        if (data.mode) this.mode = data.mode;
+        if (typeof data.uptime === 'number') this.uptime = data.uptime;
         if (Object.prototype.hasOwnProperty.call(data, 'programRunning')) this.programRunning = !!data.programRunning;
         this._applyClockBaseline(data.uptime, data.timerRemaining, data.programRunning);
         this.startClockExtrapolation();
-        this.voltage = data.voltage;
-        this.tempSensors = Array.isArray(data.tempSensors) ? data.tempSensors : [];
+        if (Object.prototype.hasOwnProperty.call(data, 'voltage')) this.voltage = data.voltage;
+        if (Array.isArray(data.tempSensors)) this.tempSensors = data.tempSensors;
         // New contract: *_ById maps. Derive internal arrays using hwMap (from /bootstrap).
         const relayMap = (data && data.relaysById && typeof data.relaysById === 'object') ? data.relaysById : null;
-        this.relays = projectByIdMap(this.hwMap, 'relays', relayMap, (v) => !!v) || [];
+        const nextRelays = projectByIdMap(this.hwMap, 'relays', relayMap, (v) => !!v);
+        if (nextRelays) this.relays = nextRelays;
 
         const inputMap = (data && data.inputsById && typeof data.inputsById === 'object') ? data.inputsById : null;
         const freqMap = (data && data.inputFrequenciesById && typeof data.inputFrequenciesById === 'object') ? data.inputFrequenciesById : null;
         const enMap = (data && data.inputsEnabledById && typeof data.inputsEnabledById === 'object') ? data.inputsEnabledById : null;
-        this.inputs = projectByIdMap(this.hwMap, 'inputs', inputMap, (v) => !!v) || [];
-        this.inputFrequencies = projectByIdMap(this.hwMap, 'inputs', freqMap, (v) => (v === null || v === undefined) ? null : v) || [];
-        this.inputsEnabled = projectByIdMap(this.hwMap, 'inputs', enMap, (v) => !!v) || [];
-        this.runtime = (data && typeof data.runtime === 'object' && !Array.isArray(data.runtime)) ? data.runtime : {};
-        this.lastProgramName = data.lastProgramName || '—';
+        const nextInputs = projectByIdMap(this.hwMap, 'inputs', inputMap, (v) => !!v);
+        if (nextInputs) this.inputs = nextInputs;
+        const nextFreq = projectByIdMap(this.hwMap, 'inputs', freqMap, (v) => (v === null || v === undefined) ? null : v);
+        if (nextFreq) this.inputFrequencies = nextFreq;
+        const nextEn = projectByIdMap(this.hwMap, 'inputs', enMap, (v) => !!v);
+        if (nextEn) this.inputsEnabled = nextEn;
+        if (data && typeof data.runtime === 'object' && !Array.isArray(data.runtime)) this.runtime = data.runtime;
+        if (Object.prototype.hasOwnProperty.call(data, 'lastProgramName')) {
+          this.lastProgramName = data.lastProgramName || '—';
+        }
         // Allow null to clear the field after program finishes.
         if (data && Object.prototype.hasOwnProperty.call(data, 'currentProgramName')) {
           this.currentProgramName = data.currentProgramName;

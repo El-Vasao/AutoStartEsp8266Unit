@@ -258,6 +258,7 @@ void WebServerRuntime::stop(WebServer& ws) {
     ws.lastObservedSseClients_ = 0;
     ws.sseDiagTailUntilMs_ = 0;
     ws.lastSseDiagMs_ = 0;
+    ws.clearHeavyUiTraffic();
     for (auto& session : ws.uiSessions_) {
         session = WebServer::UiSession{};
     }
@@ -329,6 +330,8 @@ bool WebServerRuntime::sseSoftQueueAllowsSend(WebServer& ws, size_t maxAvgQueued
 }
 
 bool WebServerRuntime::sseLogChannelAllowsSend(WebServer& ws, size_t maxAvgQueued) {
+    // Same gates as status path: no UI lease → no log SSE (avoids queue churn without a viewer).
+    if (ws.activeUiSessionCount_ == 0) return false;
     if (refreshSseClientCount(ws) == 0) return false;
     if (ESP.getFreeHeap() < MemorySlo::MIN_HEAP_FOR_SSE_SEND) return false;
     if (ESP.getMaxFreeBlockSize() < MemorySlo::MIN_MAX_BLOCK_FOR_WEB_SEND) return false;
