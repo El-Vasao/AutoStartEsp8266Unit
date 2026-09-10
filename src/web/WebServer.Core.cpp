@@ -17,7 +17,7 @@
 #include "core/FlashCommitCoordinator.h"
 #include "core/Core.h"
 #include <DNSServer.h>
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include "common/Logger.h"
 #include "common/Constants.h"
 #include "common/PoolManager.h"

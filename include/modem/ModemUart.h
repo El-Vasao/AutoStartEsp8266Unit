@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "common/Pins.h"
 
 class ModemUart {
 public:
@@ -19,7 +20,7 @@ public:
         _byteHandlerCtx = ctx;
     }
 
-    void begin(uint32_t baud) { _serial.begin(baud); }
+    void begin(uint32_t baud) { _serial.begin(baud, SERIAL_8N1, Pin::GSM_RX, Pin::GSM_TX); }
 
     // When enabled, disables line framing while still forwarding raw bytes to byte handler.
     // Needed for manual RX modes where binary payload follows AT headers.

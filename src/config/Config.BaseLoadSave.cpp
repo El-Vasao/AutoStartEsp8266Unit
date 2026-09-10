@@ -1,11 +1,12 @@
 #include "config/Config.h"
+#include "common/EspHal.h"
 #include "fs/FSManager.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
 #include "config/internal/BaseConfigJsonIo.h"
 #include "config/internal/ConfigStorageInternal.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <stdlib.h>
 
 Config config;
@@ -63,14 +64,14 @@ bool Config::loadBaseFromFile(const char* path, BaseConfig& target, size_t& outL
 bool Config::saveBaseConfig(const BaseConfig& cfg) {
     size_t len = 0;
     configCRC = config_internal::crc16SerializedBaseConfig(cfg, &len);
-    ESP.wdtFeed();
+    espHalFeedWdt();
     if (len == 0 || len >= Limits::CONFIG_JSON_SIZE) {
         logger.log("[Config] Serialization failed/too large (len=%u)\n", (unsigned)len);
         return false;
     }
 
     wdtPort_.feedNow();
-    ESP.wdtFeed();
+    espHalFeedWdt();
     if (!fileSystem.writeJsonAtomicStream("/config.json", encodeBaseConfigForSave, const_cast<BaseConfig*>(&cfg),
                                           Limits::CONFIG_JSON_SIZE)) {
         logger.log("[Config] Failed to save base config\n");
@@ -125,7 +126,7 @@ void prepareFlashWriteLogGcAndWdt() {
         logger.log("[Config] Free space after GC: %u bytes\n", freeSpace);
     }
     config.wdtPort().feedNow();
-    ESP.wdtFeed();
+    espHalFeedWdt();
 }
 
 bool ensureProgramsDir() {

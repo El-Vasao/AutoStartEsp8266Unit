@@ -1,7 +1,6 @@
 #include "common/PoolManager.h"
 #include "program/CompiledStep.h"
 #include <Arduino.h>
-#include <ets_sys.h>
 
 namespace {
 

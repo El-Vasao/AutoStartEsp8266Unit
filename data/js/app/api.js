@@ -105,16 +105,9 @@
     }
   };
 
-  api.isLowMemoryResponse = function isLowMemoryResponse(res) {
-    try {
-      if (!res) return false;
-      if (res.status !== 503) return false;
-      const err = String(res?.data?.error || '').toUpperCase();
-      if (err === 'LOW_MEMORY') return true;
-      return String(res?.text || '').toUpperCase().includes('LOW_MEMORY');
-    } catch (e) {
-      return false;
-    }
+  api.isLowMemoryResponse = function isLowMemoryResponse(/* res */) {
+    // ESP32-C3: firmware no longer returns LOW_MEMORY 503 gates; keep stub for callers.
+    return false;
   };
 
   api.apiJsonWithBusyRetry = async function apiJsonWithBusyRetry(url, options = {}, retry = {}) {

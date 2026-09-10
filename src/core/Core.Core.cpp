@@ -1,5 +1,6 @@
 // src/core/Core.Core.cpp
 #include "core/Core.h"
+#include "common/EspHal.h"
 #include "core/internal/CorePrivate.h"
 
 #include "config/Config.h"
@@ -10,7 +11,7 @@
 #include "core/FlashCommitCoordinator.h"
 #include "core/CoreHardRestart.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 Core core;
 CorePrivate g_coreImpl;
@@ -41,8 +42,8 @@ static void factoryResetThunk(void* ctx) {
 }
 
 static void logHeapTag_(const char* tag) {
-    logger.log("[Core] heap %s: free=%u maxBlk=%u frag=%u%%\n", tag, (unsigned)ESP.getFreeHeap(),
-               (unsigned)ESP.getMaxFreeBlockSize(), (unsigned)ESP.getHeapFragmentation());
+    logger.log("[Core] heap %s: free=%u maxBlk=%u frag=%u%%\n", tag, (unsigned)espHalFreeHeap(),
+               (unsigned)espHalMaxBlock(), (unsigned)0 /* heap frag N/A on ESP32 */);
 }
 
 static void drainDeferredOtaFromWebUpload_(CorePrivate& impl) {
@@ -82,9 +83,9 @@ bool Core::begin() {
 
     logger.log("\n[Core] begin\n");
     logger.log("[Core] Reset reason: %s\n", getResetReason());
-    if (ESP.getChipId() == 0) return false;
+    if (!espHalChipIdValid()) return false;
 
-    ESP.wdtEnable(WDTO_8S);
+    espHalWdtEnable();
     impl.lastWdtFeed = millis();
 
     config.setWdtPort(WdtPort{this, wdtFeedThunk, cooperateThunk});

@@ -23,7 +23,7 @@
 #pragma once
 
 #include <ESPAsyncWebServer.h>
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include "common/Constants.h"
 
 enum class CoreMode : uint8_t;

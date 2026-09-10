@@ -1,7 +1,7 @@
 #include "fs/FSManager.h"
 #include "common/Constants.h"
 #include "common/Logger.h"
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <pgmspace.h>
 
 FSManager fileSystem;
@@ -38,10 +38,19 @@ static const FileMetadata fileRegistry[] PROGMEM = {
         0
     },
     {
-        "/app.bundle.js",
+        "/style.css",
         FilePriority::PRIO_HIGH,
         FileAccess::ACCESS_READ_ONLY,
-        FileMax::APP_BUNDLE_JS,
+        FileMax::STYLE_CSS,
+        false,
+        true,
+        0
+    },
+    {
+        "/app.js",
+        FilePriority::PRIO_HIGH,
+        FileAccess::ACCESS_READ_ONLY,
+        FileMax::APP_JS,
         false,
         true,
         0
@@ -79,7 +88,7 @@ FSManager::FSManager() :
     recoveryCount(0),
     lastHealthCheck(0)
 {
-    memset(&fsInfo, 0, sizeof(FSInfo));
+    memset(&fsInfo, 0, sizeof(FsSpaceInfo));
     memset(pathBuffer, 0, sizeof(pathBuffer));
 }
 
@@ -90,7 +99,8 @@ bool FSManager::begin() {
 
     if (LittleFS.begin()) {
         initialized = true;
-        LittleFS.info(fsInfo);
+        fsInfo.totalBytes = LittleFS.totalBytes();
+        fsInfo.usedBytes = LittleFS.usedBytes();
         logger.log("[FSManager] LittleFS mounted, total: %u KB, used: %u KB\n",
                    fsInfo.totalBytes / 1024, fsInfo.usedBytes / 1024);
         if (!LittleFS.exists("/programs")) {
@@ -131,7 +141,8 @@ bool FSManager::begin() {
     }
 
     initialized = true;
-    LittleFS.info(fsInfo);
+    fsInfo.totalBytes = LittleFS.totalBytes();
+    fsInfo.usedBytes = LittleFS.usedBytes();
     if (!LittleFS.exists("/programs")) {
         LittleFS.mkdir("/programs");
     }
@@ -226,13 +237,10 @@ bool FSManager::hasRequiredWebAssets() const {
     char gzPath[BufferBytes::Fs::WEB_ASSET_GZIP_PATH];
 
     for (size_t i = 0; i < WebAssets::REQUIRED_COUNT; i++) {
-        auto ptr = (PGM_P)pgm_read_ptr(&WebAssets::REQUIRED[i]);
+        const char* ptr = WebAssets::REQUIRED[i];
         if (!ptr) return false;
 
-        // На некоторых сборках ESP8266 нет strlcpy_P, поэтому используем strncpy_P
-        // и гарантируем '\0' в конце.
-        strncpy_P(path, ptr, sizeof(path) - 1);
-        path[sizeof(path) - 1] = '\0';
+        strlcpy(path, ptr, sizeof(path));
         if (path[0] == '\0') return false;
 
         if (LittleFS.exists(path)) continue;
@@ -246,5 +254,23 @@ bool FSManager::hasRequiredWebAssets() const {
     }
 
     return true;
+}
+
+void FSManager::forEachInDir(const char* path, DirVisitFn fn, void* ctx) {
+    if (!initialized || !path || !fn) return;
+    File root = LittleFS.open(path);
+    if (!root || !root.isDirectory()) {
+        if (root) root.close();
+        return;
+    }
+    File entry = root.openNextFile();
+    while (entry) {
+        const char* name = entry.name();
+        if (name && name[0]) {
+            fn(name, entry, ctx);
+        }
+        entry = root.openNextFile();
+    }
+    root.close();
 }
 

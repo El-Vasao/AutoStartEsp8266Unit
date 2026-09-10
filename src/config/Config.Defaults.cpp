@@ -1,11 +1,12 @@
 #include "config/Config.h"
+#include "common/EspHal.h"
 #include "config/DefaultConfig.h"
 #include "fs/FSManager.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
 #include "config/internal/BaseConfigJsonIo.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 namespace {
 
@@ -33,7 +34,7 @@ bool Config::reset() {
         logger.log("[Config] Failed to write config file\n");
         return false;
     }
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     baseCache = cfg;
     size_t serLen = 0;

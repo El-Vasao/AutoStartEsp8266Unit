@@ -21,13 +21,14 @@
 
 #include "config/Config.h"
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
 #include "core/Core.h"
 #include "fs/FSManager.h"
 
 #include <DNSServer.h>
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <cstring>
 
 extern DNSServer dnsServer;
@@ -105,15 +106,6 @@ void WebServerRuntime::update(WebServer& ws) {
         if (ws.apStartState_ == WebServer::ApStartState::WaitApStart) {
             if ((int32_t)(now - ws.apStartStageUntilMs_) < 0) return;
 
-            const uint32_t freeHeap = ESP.getFreeHeap();
-            const uint32_t maxBlk = ESP.getMaxFreeBlockSize();
-            if (freeHeap < MemorySlo::MIN_HEAP_BEFORE_HTTP_START || maxBlk < MemorySlo::MIN_MAX_BLOCK_FOR_WEB_SEND) {
-                ws.apStartStageUntilMs_ = now + 250;
-                logger.log("[WebServer] AP start delayed: low heap before HTTP (free=%u max=%u)\n",
-                           (unsigned)freeHeap, (unsigned)maxBlk);
-                return;
-            }
-
             dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
             dnsServer.start(WebConfig::DNS_PORT, "*", apIP);
 
@@ -130,7 +122,8 @@ void WebServerRuntime::update(WebServer& ws) {
 
             char ipStr[BufferBytes::Web::IP_STRING];
             snprintf(ipStr, sizeof(ipStr), "%u.%u.%u.%u", apIP[0], apIP[1], apIP[2], apIP[3]);
-            logger.log("[WebServer] AP started, SSID: %s, IP: %s\n", ws.lastApSsid, ipStr);
+            logger.log("[WebServer] AP started, SSID: %s, IP: %s (heap free=%u max=%u)\n",
+                       ws.lastApSsid, ipStr, (unsigned)espHalFreeHeap(), (unsigned)espHalMaxBlock());
 
             ws.apStartState_ = WebServer::ApStartState::Idle;
             return;
@@ -144,11 +137,10 @@ void WebServerRuntime::processUiSessions(WebServer& ws) {
     for (auto& session : ws.uiSessions_) {
         if (!session.active) continue;
         if (now - session.lastSeenMs < WebUi::SESSION_TIMEOUT_MS) continue;
-        logger.log("[WebServer] UI session expired: id=%lu, heap=%u, max=%u, frag=%u%%\n",
+        logger.log("[WebServer] UI session expired: id=%lu, heap=%u, max=%u\n",
                    static_cast<unsigned long>(session.id),
-                   (unsigned)ESP.getFreeHeap(),
-                   (unsigned)ESP.getMaxFreeBlockSize(),
-                   (unsigned)ESP.getHeapFragmentation());
+                   (unsigned)espHalFreeHeap(),
+                   (unsigned)espHalMaxBlock());
         session.active = false;
         session.id = 0;
         session.lastSeenMs = 0;
@@ -205,8 +197,8 @@ void WebServerRuntime::closeSseForOta(WebServer& ws) {
     const uint16_t clients = refreshSseClientCount(ws);
     const size_t queue = ws.events.avgPacketsWaiting();
     logger.log("[WebServer] OTA: closing SSE (clients=%u queue=%u) heap free=%u maxBlk=%u frag=%u%%\n",
-               (unsigned)clients, (unsigned)queue, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize(),
-               (unsigned)ESP.getHeapFragmentation());
+               (unsigned)clients, (unsigned)queue, (unsigned)espHalFreeHeap(), (unsigned)espHalMaxBlock(),
+               (unsigned)0 /* heap frag N/A on ESP32 */);
     for (auto& session : ws.uiSessions_) {
         session = WebServer::UiSession{};
     }
@@ -216,7 +208,7 @@ void WebServerRuntime::closeSseForOta(WebServer& ws) {
     ws.sseDiagTailUntilMs_ = 0;
     ws.events.close();
     logger.log("[WebServer] OTA: SSE teardown done heap free=%u maxBlk=%u frag=%u%%\n",
-               (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize(), (unsigned)ESP.getHeapFragmentation());
+               (unsigned)espHalFreeHeap(), (unsigned)espHalMaxBlock(), (unsigned)0 /* heap frag N/A on ESP32 */);
 }
 
 void WebServerRuntime::start(WebServer& ws, CoreMode mode) {
@@ -321,8 +313,6 @@ void WebServerRuntime::startWithParams(WebServer& ws, const char* ssid, const ch
 bool WebServerRuntime::sseSoftQueueAllowsSend(WebServer& ws, size_t maxAvgQueued) {
     if (ws.activeUiSessionCount_ == 0) return false;
     if (refreshSseClientCount(ws) == 0) return false;
-    if (ESP.getFreeHeap() < MemorySlo::MIN_HEAP_FOR_SSE_SEND) return false;
-    if (ESP.getMaxFreeBlockSize() < MemorySlo::MIN_MAX_BLOCK_FOR_WEB_SEND) return false;
     const size_t limit = core.isOtaUploadPressureActive()
         ? min(maxAvgQueued, WebSseLimits::OTA_PREP_STATUS_QUEUE_MAX)
         : maxAvgQueued;
@@ -333,8 +323,6 @@ bool WebServerRuntime::sseLogChannelAllowsSend(WebServer& ws, size_t maxAvgQueue
     // Same gates as status path: no UI lease → no log SSE (avoids queue churn without a viewer).
     if (ws.activeUiSessionCount_ == 0) return false;
     if (refreshSseClientCount(ws) == 0) return false;
-    if (ESP.getFreeHeap() < MemorySlo::MIN_HEAP_FOR_SSE_SEND) return false;
-    if (ESP.getMaxFreeBlockSize() < MemorySlo::MIN_MAX_BLOCK_FOR_WEB_SEND) return false;
     const size_t limit = core.isOtaUploadPressureActive()
         ? min(maxAvgQueued, WebSseLimits::OTA_PREP_LOG_QUEUE_MAX)
         : maxAvgQueued;

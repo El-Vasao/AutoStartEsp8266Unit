@@ -6,9 +6,10 @@
 #include "mqtt/MqttStatusBuilder.h"
 
 #include "app/StatusSnapshot.h"
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <cstring>
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "common/Logger.h"
 #include "common/Pins.h"
 #include "common/Version.h"
@@ -141,7 +142,7 @@ void MQTTClient::begin() {
     // (e.g. if source length == buffer size). MQTT strings must be well-formed.
     const char* clientId = mqttCfg.client_id;
     if (!clientId || clientId[0] == '\0') {
-        snprintf(_mqttClientId, sizeof(_mqttClientId), "autostart-%06X", (unsigned)ESP.getChipId());
+        snprintf(_mqttClientId, sizeof(_mqttClientId), "autostart-%06X", (unsigned)espHalChipId());
     } else {
         strlcpy(_mqttClientId, clientId, sizeof(_mqttClientId));
     }

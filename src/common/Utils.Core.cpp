@@ -1,5 +1,6 @@
 #include "common/Utils.h"
-#include <ESP8266WiFi.h>
+#include "common/EspHal.h"
+#include <WiFi.h>
 #include <FS.h>
 
 /**
@@ -45,7 +46,7 @@ uint16_t crc16ModbusStreamFile(File& f) {
         crc = crc16ModbusFeedBytes(crc, buf, static_cast<size_t>(n));
         fed += static_cast<unsigned>(n);
         if ((fed & 0xFFu) == 0) {
-            ESP.wdtFeed();
+            espHalFeedWdt();
             // Важно: для ESP8266 одного wdtFeed недостаточно — нужно иногда отдавать управление SDK.
             yield();
         }

@@ -1,11 +1,12 @@
 #include "config/Config.h"
+#include "common/EspHal.h"
 #include "fs/FSManager.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
 #include "config/internal/ProgramJsonIo.h"
 #include "config/internal/ConfigStorageInternal.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 #include <stdlib.h>
 
@@ -70,7 +71,7 @@ bool Config::writeProgramFile(const Program& prog) {
     prepareFlashWriteLogGcAndWdt();
 
     wdtPort_.feedNow();
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     if (!fileSystem.writeJsonAtomicStream(path, encodeProgramSave, const_cast<Program*>(&prog), Limits::CONFIG_JSON_SIZE)) {
         logger.log("[Config] Failed to write program file\n");
@@ -84,7 +85,7 @@ bool Config::writeProgramFile(const Program& prog) {
 bool Config::saveProgram(const Program& prog) {
     if (!writeProgramFile(prog)) return false;
     wdtPort_.feedNow();
-    ESP.wdtFeed();
+    espHalFeedWdt();
     if (!rebuildProgramIndex()) {
         logger.log("[Config] Program file saved but index rebuild failed!\n");
         return false;
@@ -116,23 +117,49 @@ bool Config::resetPrograms() {
     if (!ensureProgramsDir()) return false;
 
     bool ok = true;
-    Dir dir = fileSystem.openDir("/programs");
-    while (dir.next()) {
-        wdtPort_.feedNow();
-        wdtPort_.feedNow();
-        const String& fn = dir.fileName();
-        const char* fns = fn.c_str();
-        size_t n = fn.length();
-        if (n < 6) continue;
-        if (strcmp(fns + (n - 5), ".json") != 0) continue;
-        if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) continue;
-        if (strcmp(fns, "index.json") == 0) continue;
-        File xf = dir.openFile("r");
-        if (xf) xf.close();
+    File root = fileSystem.openDir("/programs");
+    if (root) {
+        File entry = root.openNextFile();
+        while (entry) {
+            wdtPort_.feedNow();
+            wdtPort_.feedNow();
+            const char* fns = entry.name();
+            if (!fns) {
+                entry = root.openNextFile();
+                continue;
+            }
+            size_t n = strlen(fns);
+            if (n < 6) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (strcmp(fns + (n - 5), ".json") != 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (strcmp(fns, "index.json") == 0) {
+                entry = root.openNextFile();
+                continue;
+            }
 
-        if (!fileSystem.deleteFile(fns)) {
-            ok = false;
+            char pathBuf[BufferBytes::Fs::PROGRAM_PATH];
+            // ESP32 may return basename or full path; normalize to /programs/<name>.
+            if (fns[0] == '/') {
+                strlcpy(pathBuf, fns, sizeof(pathBuf));
+            } else {
+                snprintf(pathBuf, sizeof(pathBuf), "/programs/%s", fns);
+            }
+            entry.close();
+            if (!fileSystem.deleteFile(pathBuf)) {
+                ok = false;
+            }
+            entry = root.openNextFile();
         }
+        root.close();
     }
 
     if (!rebuildProgramIndex()) ok = false;

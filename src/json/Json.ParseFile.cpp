@@ -2,6 +2,7 @@
 #include "json/Json.ParseFile.h"
 
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "JsonStreamingParser.h"
 #include "JsonListener.h"
 
@@ -29,7 +30,7 @@ bool jsonStreamingParseWholeFile(File& file, JsonListener& listener) {
         }
         fed += static_cast<uint32_t>(n);
         if ((fed & 0xFFu) == 0) {
-            ESP.wdtFeed();
+            espHalFeedWdt();
         }
     }
     return true;
@@ -46,7 +47,7 @@ bool jsonStreamingParseProgmem(JsonListener& listener, const char* pgmPtr) {
         parser.parse(c);
         pgmPtr++;
         if ((((uintptr_t)pgmPtr) & 0xFFu) == 0) {
-            ESP.wdtFeed();
+            espHalFeedWdt();
         }
     }
     return true;

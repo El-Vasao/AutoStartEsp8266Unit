@@ -1,18 +1,19 @@
 #include "core/CoreHardRestart.h"
+#include "common/EspHal.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 [[noreturn]] __attribute__((noinline)) void core_hard_restart_now() {
-    ESP.wdtFeed();
+    espHalFeedWdt();
 #ifdef SERIAL_DEBUG
     Serial.flush();
 #endif
     // После тяжёлого FS/JSON стека даём SDK один проход перед system_restart().
     yield();
-    ESP.wdtFeed();
+    espHalFeedWdt();
     ESP.restart();
     while (true) {
-        ESP.wdtFeed();
+        espHalFeedWdt();
         delayMicroseconds(5000);
     }
 }

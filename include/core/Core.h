@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "common/EspHal.h"
 
 #include "common/Version.h"
 #include "common/Constants.h"
@@ -60,7 +61,7 @@ public:
     void setRebootRequired(bool v);
 
     // Свободная память кучи
-    uint32_t getFreeHeap() const { return ESP.getFreeHeap(); }
+    uint32_t getFreeHeap() const { return espHalFreeHeap(); }
 
     /// Снимок кучи (free / max block / fragmentation + min с момента загрузки). `tag` — опциональная метка события.
     void logHeapSnapshot(const char* tag = nullptr) const;

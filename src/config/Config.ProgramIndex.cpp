@@ -1,4 +1,5 @@
 #include "config/Config.h"
+#include "common/EspHal.h"
 #include "fs/FSManager.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
@@ -55,27 +56,53 @@ bool Config::ensureProgramIndex() {
     size_t filesCount = 0;
 
     logger.log("[Config] ensureProgramIndex: scanning /programs\n");
-    Dir dir = fileSystem.openDir("/programs");
-    while (dir.next()) {
-        wdtPort_.feedNow();
-        wdtPort_.feedNow();
-        const String& fn = dir.fileName();
-        const char* fns = fn.c_str();
-        size_t n = fn.length();
-        if (n < 6) continue;
-        if (strcmp(fns + (n - 5), ".json") != 0) continue;
-        if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) continue;
-        if (strcmp(fns, "index.json") == 0) continue;
+    File root = fileSystem.openDir("/programs");
+    if (root) {
+        File entry = root.openNextFile();
+        while (entry) {
+            wdtPort_.feedNow();
+            wdtPort_.feedNow();
+            const char* fns = entry.name();
+            if (!fns) {
+                entry = root.openNextFile();
+                continue;
+            }
+            size_t n = strlen(fns);
+            if (n < 6) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (strcmp(fns + (n - 5), ".json") != 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (strcmp(fns, "index.json") == 0) {
+                entry = root.openNextFile();
+                continue;
+            }
 
-        const char* base = strrchr(fns, '/');
-        base = base ? (base + 1) : fns;
-        char* endptr = nullptr;
-        long idInt = strtol(base, &endptr, 10);
-        if (!endptr || strcmp(endptr, ".json") != 0) continue;
-        if (idInt <= 0 || idInt > 255) continue;
+            const char* base = strrchr(fns, '/');
+            base = base ? (base + 1) : fns;
+            char* endptr = nullptr;
+            long idInt = strtol(base, &endptr, 10);
+            if (!endptr || strcmp(endptr, ".json") != 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (idInt <= 0 || idInt > 255) {
+                entry = root.openNextFile();
+                continue;
+            }
 
-        present[(uint8_t)idInt] = true;
-        filesCount++;
+            present[(uint8_t)idInt] = true;
+            filesCount++;
+            entry = root.openNextFile();
+        }
+        root.close();
     }
 
     bool mismatch = true;
@@ -135,56 +162,84 @@ bool Config::rebuildProgramIndex() {
     size_t count = 0;
 
     logger.log("[Config] rebuildProgramIndex: scanning /programs\n");
-    ESP.wdtFeed();
-    Dir dir = fileSystem.openDir("/programs");
-    while (dir.next()) {
-        wdtPort_.feedNow();
-        wdtPort_.feedNow();
-        const String& fn = dir.fileName();
-        const char* fns = fn.c_str();
-        size_t n = fn.length();
-        if (n < 6) continue;
-        if (strcmp(fns + (n - 5), ".json") != 0) continue;
-        if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) continue;
-        if (strcmp(fns, "index.json") == 0) continue;
+    espHalFeedWdt();
+    File root = fileSystem.openDir("/programs");
+    if (root) {
+        File entry = root.openNextFile();
+        while (entry) {
+            wdtPort_.feedNow();
+            wdtPort_.feedNow();
+            char pathName[BufferBytes::Fs::PROGRAM_PATH];
+            const char* rawName = entry.name();
+            if (!rawName) {
+                entry = root.openNextFile();
+                continue;
+            }
+            strlcpy(pathName, rawName, sizeof(pathName));
+            const char* fns = pathName;
+            size_t n = strlen(fns);
+            if (n < 6) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (strcmp(fns + (n - 5), ".json") != 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (n >= 10 && strcmp(fns + (n - 10), "/index.json") == 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (strcmp(fns, "index.json") == 0) {
+                entry = root.openNextFile();
+                continue;
+            }
 
-        const char* base = strrchr(fns, '/');
-        base = base ? (base + 1) : fns;
-        char* endptr = nullptr;
-        long idInt = strtol(base, &endptr, 10);
-        if (!endptr || strcmp(endptr, ".json") != 0) continue;
-        if (idInt <= 0 || idInt > 255) continue;
-        const uint8_t id = static_cast<uint8_t>(idInt);
+            const char* base = strrchr(fns, '/');
+            base = base ? (base + 1) : fns;
+            char* endptr = nullptr;
+            long idInt = strtol(base, &endptr, 10);
+            if (!endptr || strcmp(endptr, ".json") != 0) {
+                entry = root.openNextFile();
+                continue;
+            }
+            if (idInt <= 0 || idInt > 255) {
+                entry = root.openNextFile();
+                continue;
+            }
+            const uint8_t id = static_cast<uint8_t>(idInt);
 
-        File f = dir.openFile("r");
-        if (!f) continue;
+            uint8_t rid = 0;
+            char name[sizeof program_json::IndexRow::name];
+            name[0] = '\0';
+            const bool okHdr = program_json::parseProgramHeaderFile(entry, id, &rid, name, sizeof name);
+            entry.close();
+            if (!okHdr) {
+                logger.log("[Config] rebuildProgramIndex: skip %s (header parse)\n", fns);
+                entry = root.openNextFile();
+                continue;
+            }
+            const uint8_t realId = rid ? rid : id;
+            if (realId != id) {
+                logger.log("[Config] rebuildProgramIndex: skip %s (id mismatch %u!=%u)\n",
+                           fns, (unsigned)realId, (unsigned)id);
+                entry = root.openNextFile();
+                continue;
+            }
 
-        uint8_t rid = 0;
-        char name[sizeof program_json::IndexRow::name];
-        name[0] = '\0';
-        const bool okHdr = program_json::parseProgramHeaderFile(f, id, &rid, name, sizeof name);
-        f.close();
-        if (!okHdr) {
-            logger.log("[Config] rebuildProgramIndex: skip %s (header parse)\n", fns);
-            continue;
+            if (count >= Limits::MAX_PROGRAMS) {
+                logger.log("[Config] rebuildProgramIndex: too many programs\n");
+                break;
+            }
+            items[count].id = id;
+            strlcpy(items[count].name, name, sizeof items[count].name);
+            count++;
+            entry = root.openNextFile();
         }
-        const uint8_t realId = rid ? rid : id;
-        if (realId != id) {
-            logger.log("[Config] rebuildProgramIndex: skip %s (id mismatch %u!=%u)\n",
-                       fns, (unsigned)realId, (unsigned)id);
-            continue;
-        }
-
-        if (count >= Limits::MAX_PROGRAMS) {
-            logger.log("[Config] rebuildProgramIndex: too many programs\n");
-            break;
-        }
-        items[count].id = id;
-        strlcpy(items[count].name, name, sizeof items[count].name);
-        count++;
+        root.close();
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     for (size_t i = 0; i + 1 < count; i++) {
         wdtPort_.feedNow();
@@ -198,7 +253,7 @@ bool Config::rebuildProgramIndex() {
         }
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     struct Ctx {
         const program_json::IndexRow* rows;

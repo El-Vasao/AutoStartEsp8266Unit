@@ -1,9 +1,10 @@
 // src/web/WebServer.JsonIngest.cpp
 #include "web/WebServer.h"
+#include "common/EspHal.h"
 #include "fs/FSManager.h"
 #include "core/FlashCommitCoordinator.h"
 #include "common/Logger.h"
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 
 namespace {
@@ -150,7 +151,7 @@ void WebServer::jsonPostStreamOnBody(JsonPostStreamKind k, AsyncWebServerRequest
         }
         logger.log("[WebServer] %s: streaming body to %s (~%u bytes, heap=%u)\n",
                    k == JsonPostStreamKind::Config ? "config" : "program",
-                   jsonPostTmpPath(k), (unsigned)total, ESP.getFreeHeap());
+                   jsonPostTmpPath(k), (unsigned)total, espHalFreeHeap());
         jsonPostSetThisPending(k, true);
         request->_tempObject = c;
     }

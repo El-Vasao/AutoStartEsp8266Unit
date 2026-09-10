@@ -1,5 +1,6 @@
 // src/core/Core.Timing.cpp
 #include "core/Core.h"
+#include "common/EspHal.h"
 #include "core/internal/CorePrivate.h"
 
 void Core::updateUptime() {
@@ -20,8 +21,8 @@ void Core::feedWatchdog() {
         // Контракт:
         // - функция безопасна для частого вызова; фактически кормит WDT не чаще заданного интервала,
         //   чтобы не раздувать стоимость “длинных” операций (FS/OTA) лишними вызовами.
-        // - используем `ESP.wdtFeed()` вместо `yield()` — yield может быть слишком частым в tight loops.
-        ESP.wdtFeed();
+        // - используем `espHalFeedWdt()` вместо `yield()` — yield может быть слишком частым в tight loops.
+        espHalFeedWdt();
         impl.lastWdtFeed = now;
     }
 }

@@ -6,13 +6,13 @@
 #include "fs/FSManager.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
+#include "common/EspHal.h"
 
-#include <user_interface.h>
+#include <esp_system.h>
 
 void Core::logHeapSnapshot(const char* tag) const {
-    uint32_t freeHeap = ESP.getFreeHeap();
-    uint32_t maxBlock = ESP.getMaxFreeBlockSize();
-    uint8_t frag = ESP.getHeapFragmentation();
+    uint32_t freeHeap = espHalFreeHeap();
+    uint32_t maxBlock = espHalMaxBlock();
     static uint32_t sessionMinFree = 0xFFFFFFFFu;
     static uint32_t sessionMinMaxBlk = 0xFFFFFFFFu;
     if (freeHeap < sessionMinFree) {
@@ -22,11 +22,11 @@ void Core::logHeapSnapshot(const char* tag) const {
         sessionMinMaxBlk = maxBlock;
     }
     if (tag && tag[0]) {
-        logger.log("[Core][%s] Heap: %u bytes, Max block: %u, Frag: %u%% (since boot min free=%u min maxBlk=%u)\n", tag,
-                   freeHeap, maxBlock, frag, sessionMinFree, sessionMinMaxBlk);
+        logger.log("[Core][%s] Heap: %u bytes, Max block: %u (since boot min free=%u min maxBlk=%u)\n", tag,
+                   freeHeap, maxBlock, sessionMinFree, sessionMinMaxBlk);
     } else {
-        logger.log("[Core] Heap: %u bytes, Max block: %u, Frag: %u%% (since boot min free=%u min maxBlk=%u)\n",
-                   freeHeap, maxBlock, frag, sessionMinFree, sessionMinMaxBlk);
+        logger.log("[Core] Heap: %u bytes, Max block: %u (since boot min free=%u min maxBlk=%u)\n",
+                   freeHeap, maxBlock, sessionMinFree, sessionMinMaxBlk);
     }
 }
 
@@ -34,7 +34,7 @@ void Core::performPeriodicTasks(uint32_t now) {
     CorePrivate& impl = *_impl;
     (void)now;
 
-    // В BOOT FSM ещё пишет flash/парсит конфиг — не гоняем FS maintenance и авто-reboot по куче.
+    // В BOOT FSM ещё пишет flash/парсит конфиг — не гоняем FS maintenance.
     if (getMode() == CoreMode::BOOT) {
         return;
     }
@@ -52,30 +52,24 @@ void Core::performPeriodicTasks(uint32_t now) {
 
     if (every(Timing::ERROR_REPORT_INTERVAL_MS, impl.lastStatsPrint)) {
         logHeapSnapshot(nullptr);
-        uint32_t maxBlock = ESP.getMaxFreeBlockSize();
-        uint8_t frag = ESP.getHeapFragmentation();
-        if (frag > ValidationLimits::HEAP_FRAG_THRESHOLD || maxBlock < ValidationLimits::MIN_HEAP_BLOCK_SIZE) {
-            logger.log("[Core] CRITICAL: Low memory, scheduling restart\n");
-            this->reboot();
-        }
+        // ESP32-C3: no auto-restart on heap fragmentation (ESP8266-era HEAP_FRAG_THRESHOLD removed).
     }
 }
 
 const char* Core::getResetReason() const {
     static char reason[BufferBytes::Reset::REASON];
-    rst_info* resetInfo = ESP.getResetInfoPtr();
-    if (resetInfo->reason == REASON_WDT_RST) {
-        strcpy_P(reason, PSTR("Watchdog reset"));
-    } else {
-        const char* resetReason = "";
-        switch (resetInfo->reason) {
-            case REASON_DEFAULT_RST: resetReason = "Power on"; break;
-            case REASON_EXT_SYS_RST: resetReason = "External"; break;
-            case REASON_SOFT_RESTART: resetReason = "Software"; break;
-            case REASON_DEEP_SLEEP_AWAKE: resetReason = "Deep sleep wake"; break;
-            default: resetReason = "Unknown";
-        }
-        strlcpy(reason, resetReason, sizeof(reason));
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   strlcpy(reason, "Power on", sizeof(reason)); break;
+        case ESP_RST_EXT:       strlcpy(reason, "External", sizeof(reason)); break;
+        case ESP_RST_SW:        strlcpy(reason, "Software", sizeof(reason)); break;
+        case ESP_RST_PANIC:     strlcpy(reason, "Panic", sizeof(reason)); break;
+        case ESP_RST_INT_WDT:   strlcpy(reason, "Interrupt WDT", sizeof(reason)); break;
+        case ESP_RST_TASK_WDT:  strlcpy(reason, "Task WDT", sizeof(reason)); break;
+        case ESP_RST_WDT:       strlcpy(reason, "Watchdog reset", sizeof(reason)); break;
+        case ESP_RST_DEEPSLEEP: strlcpy(reason, "Deep sleep wake", sizeof(reason)); break;
+        case ESP_RST_BROWNOUT:  strlcpy(reason, "Brownout", sizeof(reason)); break;
+        case ESP_RST_SDIO:      strlcpy(reason, "SDIO", sizeof(reason)); break;
+        default:                strlcpy(reason, "Unknown", sizeof(reason)); break;
     }
     return reason;
 }
@@ -154,4 +148,3 @@ bool Core::isEngineRunning() const {
     const CorePrivate& impl = *_impl;
     return impl.engineRunning;
 }
-

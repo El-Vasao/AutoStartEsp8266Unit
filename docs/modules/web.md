@@ -88,7 +88,7 @@ Heartbeat `/ui/session` не heavy.
    Flash write (`runFlashWrite`) трогает только `flashLock` + busy-modal.
 3. Единый API: `beginInit()` → `setInitProgress` / phases → `unlock()` |
    `unlock({ degraded: true })` | `failInit(message)`. Splash снимается только отсюда.
-4. Head-loader `/app.bundle.js`: успех = событие `alpine:initialized`, не голый
+4. Head-loader `/app.js`: успех = событие `alpine:initialized`, не голый
    `script.onload`. Watchdog ~12s без Alpine → cache-bust reload (лимит 4).
 5. Captive `onNotFound`: отсутствующие `.js`/`.css` → **404**, не redirect `/` (иначе
    браузер парсит HTML как JS и cloak навсегда).
@@ -97,21 +97,18 @@ Heartbeat `/ui/session` не heavy.
    Safety unlock ~20s от beginInit, если путь завис. F5 reuse `uiSessionId` (без close/open).
 7. Boot splash до unlock; без `pointer-events: none` на `.container` через `ui-booting`.
 
-## SoftAP UI delivery (index + bundle)
+## SoftAP UI delivery (index + CSS + app.js)
 
-Раньше весь UI (HTML+CSS+~500 KB JS) уходил одним `index.html.gz` (~155 KB). Вкладки
-programs/settings/system жили в последних ~12% документа — после огромного inline-script в
-`<head>`. Обрыв SoftAP/TCP после панели оставлял Alpine живым, а поздние `#tab-*` без DOM.
+Сейчас (ESP32-C3, 3 gzip):
 
-Сейчас:
-
-1. `GET /` → `index.html.gz` (разметка всех вкладок + CSS) — сравнительно короткий ответ.
-2. Затем `GET /app.bundle.js` (с retry в head-loader; на FS — `app.bundle.js.gz`).
-3. Sentinel `#ui-doc-complete` + проверка `tab-panel|programs|settings|system`: при неполной
+1. `GET /` → `index.html.gz` (разметка всех вкладок) — короткий ответ.
+2. `GET /style.css` (на FS — `style.css.gz`).
+3. Затем `GET /app.js` (с retry в head-loader; на FS — `app.js.gz`).
+4. Sentinel `#ui-doc-complete` + проверка `tab-panel|programs|settings|system`: при неполной
    доставке HTML — cache-bust reload (лимит 4).
-4. Белая страница до Alpine закрыта `#boot-splash`; hang после битого bundle — watchdog.
+5. Белая страница до Alpine закрыта `#boot-splash`; hang после битого bundle — watchdog.
 
-Обязательные ассеты: `WebAssets::REQUIRED` = `/index.html` + `/app.bundle.js` (допускается `.gz`).
+Обязательные ассеты: `WebAssets::REQUIRED` = `/index.html` + `/style.css` + `/app.js` (допускается `.gz`).
 
 ## SSE
 
@@ -120,10 +117,10 @@ programs/settings/system жили в последних ~12% документа 
 - `log` — текст через `logger.log()` (только при активной UI-сессии + подписчике `/events`);
 - incremental status — kinds (`clocks`/`hardware`/…); connect/force → paced baseline.
 
-Лимиты (ESP8266 RAM):
+Лимиты (ESP32-C3):
 
-- `WebSseLimits::MAX_SSE_CLIENTS = 1` — второй EventSource закрывается на connect;
-- soft queue `SSE_SOFT_QUEUE_MAX = 4`, hard `SSE_MAX_QUEUED_MESSAGES = 8` (`platformio.ini`);
+- `WebSseLimits::MAX_SSE_CLIENTS = 4`;
+- soft queue `SSE_SOFT_QUEUE_MAX = 4`, hard `SSE_MAX_QUEUED_MESSAGES` (`platformio.ini`);
 - период incremental tick: `Timing::SSE_STATUS_INTERVAL_MS = 1000`.
 
 UI: HTTP-чеклист → SSE panel-ready (lock, deadline `sseInitDeadlineMs`=12s) → unlock;

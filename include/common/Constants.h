@@ -193,11 +193,14 @@ namespace OTA {
 // ADC (измерение напряжения)
 // ============================================================
 namespace ADC {
-    constexpr float VREF = 1.0f;
-    constexpr uint16_t MAX_RAW = 1024;   ///< 10-bit ADC (0..1023)
+    /// ESP32-C3 ADC with attenuation — calibrate later against known battery voltage.
+    constexpr float VREF = 3.3f;
+    constexpr uint16_t MAX_RAW = 4095;   ///< 12-bit ADC (0..4095)
     constexpr uint8_t SAMPLES = 10;      ///< окно усреднения
     constexpr uint8_t DIVIDER_RATIO = 15;
-    constexpr float DEFAULT_COEFF = 0.004394f; // (VREF * DIVIDER_RATIO) / MAX_RAW
+    /// Approx if attenuation set so ~1 V at divider output ≈ full scale; needs field cal.
+    /// Physical divider still outputs ~0–1 V into ADC (see SensorsController::begin).
+    constexpr float DEFAULT_COEFF = (1.0f * DIVIDER_RATIO) / 4095.0f;
 }
 
 // ============================================================
@@ -208,10 +211,10 @@ namespace APConfig {
     constexpr char DEFAULT_PASSWORD[] = "12345678";
     constexpr uint8_t CHANNEL = 1;
     constexpr uint8_t HIDDEN = 0;
-    /// В setup/emergency режимах держим минимум клиентов, чтобы снизить RAM давление до первого UI подключения.
-    constexpr uint8_t SETUP_MAX_CONNECTIONS = 1;
-    /// В NORMAL допускаем больше станций, но всё ещё ограничиваем для ESP8266.
-    constexpr uint8_t NORMAL_MAX_CONNECTIONS = 2;
+    /// ESP32-C3 SoftAP: allow a few concurrent STA (was 1 on ESP8266 RAM gates).
+    constexpr uint8_t SETUP_MAX_CONNECTIONS = 4;
+    /// В NORMAL допускаем несколько станций (ESP32-C3 имеет больше RAM).
+    constexpr uint8_t NORMAL_MAX_CONNECTIONS = 4;
     /// Legacy alias для мест, где нужна compile-time константа.
     constexpr uint8_t MAX_CONNECTIONS = NORMAL_MAX_CONNECTIONS;
 }
@@ -234,29 +237,21 @@ enum class CoreMode : uint8_t {
 };
 
 // ============================================================
-// Heap: пороги деградации (ESP8266)
+// Heap: пороги (ESP32-C3 — RAM gates essentially disabled)
 // ============================================================
 namespace ValidationLimits {
-    constexpr uint8_t HEAP_FRAG_THRESHOLD = 60;    ///< %
-    constexpr uint32_t MIN_HEAP_BLOCK_SIZE = 2048; ///< байт
+    /// Legacy; auto-restart on frag removed for ESP32-C3.
+    constexpr uint8_t HEAP_FRAG_THRESHOLD = 95;     ///< % (unused)
+    constexpr uint32_t MIN_HEAP_BLOCK_SIZE = 4096;  ///< байт (unused for reboot)
 }
 
 namespace MemorySlo {
-    /// Минимальный free heap для безопасного старта HTTP listener в AP режиме.
-    constexpr uint32_t MIN_HEAP_BEFORE_HTTP_START = 11000;
-    /// Минимальный free heap для облегчённого `/bootstrap` (без heavy live payload).
-    /// Проверяется уже внутри handler: TCP/AsyncRequest уже оплачены (~2–3 KB).
-    /// Нужен запас только под response + один send chunk (~MSS), не под body-cbuf
-    /// (JSON — measured filler). Поле: при одном SoftAP HTTP free≈6900 → порог 7000
-    /// был недостижим и резал до эмита; 5500 оставляет ~1.4 KB маржи под send.
-    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LITE = 5500;
-    /// Минимальный free heap для `/bootstrap/live` (тот же model: request уже есть).
-    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LIVE = 5500;
-    /// Минимальный free heap для отправки SSE/log сообщений.
-    /// Was 9000 — blocked all SSE after UI load in debug (~5 KB free) → panel stuck on «Загрузка данных…».
-    constexpr uint32_t MIN_HEAP_FOR_SSE_SEND = 4500;
-    /// Минимальный непрерывный блок для JSON/SSE в web-пути.
-    constexpr uint32_t MIN_MAX_BLOCK_FOR_WEB_SEND = 3072;
+    /// Thresholds kept very low so ESP32-C3 SoftAP/SSE paths never trip 503 gates.
+    constexpr uint32_t MIN_HEAP_BEFORE_HTTP_START = 4096;
+    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LITE = 4096;
+    constexpr uint32_t MIN_HEAP_FOR_BOOTSTRAP_LIVE = 4096;
+    constexpr uint32_t MIN_HEAP_FOR_SSE_SEND = 4096;
+    constexpr uint32_t MIN_MAX_BLOCK_FOR_WEB_SEND = 4096;
 }
 
 // ============================================================
@@ -368,8 +363,8 @@ namespace WebUi {
 // SSE_MAX_QUEUED_MESSAGES (см. platformio.ini); здесь только наши пороги на отправку.
 // ============================================================
 namespace WebSseLimits {
-    /// Максимум одновременных SSE `/events` клиентов (эпизодический UI: одна вкладка).
-    constexpr uint8_t MAX_SSE_CLIENTS = 1;
+    /// Максимум одновременных SSE `/events` клиентов (ESP32-C3).
+    constexpr uint8_t MAX_SSE_CLIENTS = 4;
     /// Общий мягкий порог avgPacketsWaiting() перед send (SSE log и incremental статус одной очередью).
     /// Держать ниже SSE_MAX_QUEUED_MESSAGES (platformio.ini), иначе soft gate бесполезен.
     constexpr size_t SSE_SOFT_QUEUE_MAX = 4;
@@ -387,12 +382,13 @@ namespace WebAssets {
     static const char INDEX_HTML[] PROGMEM = "/index.html";
 
     /// Обязательные файлы для “UI доступен” (FSManager учитывает возможные .gz варианты).
-    /// HTML+CSS шелл (index) и отдельный JS bundle — два GET, чтобы SoftAP не обрывал вкладки
-    /// в хвосте одного огромного gzip-монолита.
-    static const char APP_BUNDLE_JS[] PROGMEM = "/app.bundle.js";
+    /// index.html + style.css + app.js — три gzip на ESP32-C3 SoftAP.
+    static const char STYLE_CSS[] PROGMEM = "/style.css";
+    static const char APP_JS[] PROGMEM = "/app.js";
     static const char* const REQUIRED[] PROGMEM = {
         INDEX_HTML,
-        APP_BUNDLE_JS,
+        STYLE_CSS,
+        APP_JS,
     };
 
     constexpr size_t REQUIRED_COUNT = sizeof(REQUIRED) / sizeof(REQUIRED[0]);
@@ -488,10 +484,11 @@ namespace Sim800Tcp {
 // FS метаданные (ожидаемые максимальные размеры файлов)
 // ============================================================
 namespace FileMax {
-    /// index.html на FS: разметка + inline CSS (JS отдельно в app.bundle.js).
+    /// index.html на FS (CSS отдельно в style.css).
     constexpr uint32_t INDEX_HTML = 262144;
+    constexpr uint32_t STYLE_CSS = 262144;
     /// Bundled Alpine+app JS (несжатый); на FS обычно лежит .gz.
-    constexpr uint32_t APP_BUNDLE_JS = 786432;
+    constexpr uint32_t APP_JS = 786432;
     constexpr uint32_t FAVICON_ICO = 2048;
 }
 

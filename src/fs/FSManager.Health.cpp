@@ -1,21 +1,20 @@
 #include "fs/FSManager.h"
 #include "common/Logger.h"
 #include "common/Utils.h"
+#include "common/EspHal.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 bool FSManager::gc() {
     if (!initialized) return false;
 
-    ESP.wdtFeed();
-    bool result = LittleFS.gc();
-    ESP.wdtFeed();
-    if (result) {
-        gcCount++;
-        lastGCTime = millis();
-        LittleFS.info(fsInfo);
-    }
-    return result;
+    // ESP32 Arduino LittleFS has no LittleFS.gc(); keep API for call sites.
+    espHalFeedWdt();
+    gcCount++;
+    lastGCTime = millis();
+    fsInfo.totalBytes = LittleFS.totalBytes();
+    fsInfo.usedBytes = LittleFS.usedBytes();
+    return true;
 }
 
 bool FSManager::healthCheck() {
@@ -59,19 +58,22 @@ bool FSManager::healthCheck() {
 
 size_t FSManager::getFreeSpace() {
     if (!initialized) return 0;
-    LittleFS.info(fsInfo);
+    fsInfo.totalBytes = LittleFS.totalBytes();
+    fsInfo.usedBytes = LittleFS.usedBytes();
     return fsInfo.totalBytes - fsInfo.usedBytes;
 }
 
 size_t FSManager::getUsedSpace() {
     if (!initialized) return 0;
-    LittleFS.info(fsInfo);
+    fsInfo.totalBytes = LittleFS.totalBytes();
+    fsInfo.usedBytes = LittleFS.usedBytes();
     return fsInfo.usedBytes;
 }
 
 void FSManager::printStats() {
 #ifdef SERIAL_DEBUG
-    LittleFS.info(fsInfo);
+    fsInfo.totalBytes = LittleFS.totalBytes();
+    fsInfo.usedBytes = LittleFS.usedBytes();
     logger.log("[FSManager] === stats ===\n");
     logger.log("[FSManager] Total: %u KB\n", fsInfo.totalBytes / 1024);
     logger.log("[FSManager] Used: %u KB\n", fsInfo.usedBytes / 1024);
@@ -84,4 +86,3 @@ void FSManager::printStats() {
     logger.log("[FSManager] === end stats ===\n");
 #endif
 }
-

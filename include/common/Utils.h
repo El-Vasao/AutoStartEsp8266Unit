@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "common/EspHal.h"
 #include <FS.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,7 +18,7 @@
 uint16_t crc16ModbusNext(uint16_t crc, uint8_t b);
 uint16_t crc16ModbusFeedBytes(uint16_t crc, const uint8_t* data, size_t len);
 
-/// CRC по открытому файлу; периодически ESP.wdtFeed() на длинных чтениях.
+/// CRC по открытому файлу; периодически espHalFeedWdt() на длинных чтениях.
 uint16_t crc16ModbusStreamFile(File& f);
 
 // Вычисление CRC16 (Modbus) для блока данных (эквивалент FeedBytes(0xFFFF, ...))

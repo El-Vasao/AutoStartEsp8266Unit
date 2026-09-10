@@ -7,6 +7,7 @@
 
 #include "config/Config.h"
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "core/Core.h"
 #include "core/ErrorManager.h"
 #include "core/FlashCommitCoordinator.h"
@@ -437,7 +438,7 @@ static void emitClocksPayload(Print& p) {
     p.print(prog ? "true" : "false");
     commaOut(p, &c);
     p.print("\"freeHeap\":");
-    p.print(static_cast<unsigned long>(ESP.getFreeHeap()));
+    p.print(static_cast<unsigned long>(espHalFreeHeap()));
     commaOut(p, &c);
     p.print("\"lastError\":\"");
     escapeJsonString(p, core.getErrorManager().getMessage());

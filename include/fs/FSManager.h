@@ -5,6 +5,12 @@
 #include <LittleFS.h>
 #include "common/Constants.h"
 
+/** ESP32 LittleFS space snapshot (replaces ESP8266 FSInfo). */
+struct FsSpaceInfo {
+    size_t totalBytes = 0;
+    size_t usedBytes = 0;
+};
+
 // Приоритеты файлов (задел на будущее: можно использовать для политики GC/кеширования)
 enum class FilePriority : uint8_t {
     PRIO_CRITICAL = 0,   ///< критичные (config.json)
@@ -110,8 +116,12 @@ public:
     // Удалить директорию
     bool rmdir(const char* path) { return initialized ? LittleFS.rmdir(path) : false; }
 
-    // Открыть директорию для перечисления
-    Dir openDir(const char* path) { return initialized ? LittleFS.openDir(path) : Dir(); }
+    // Открыть директорию для перечисления (ESP32 LittleFS: File + openNextFile).
+    File openDir(const char* path) { return initialized ? LittleFS.open(path) : File(); }
+
+    /// Перечислить файлы в каталоге (не рекурсивно). `name` — путь/имя записи.
+    using DirVisitFn = void (*)(const char* name, File& entry, void* ctx);
+    void forEachInDir(const char* path, DirVisitFn fn, void* ctx);
 
     // Создать резервную копию файла (path.bak)
     bool backup(const char* path);
@@ -143,7 +153,7 @@ public:
     uint32_t getErrorCount() const { return errorCount; }
     uint32_t getRecoveryCount() const { return recoveryCount; }
     void printStats();
-    const FSInfo& getInfo() const { return fsInfo; }
+    const FsSpaceInfo& getInfo() const { return fsInfo; }
 
     // Потоковая запись (атомарная)
     File openWriteStream(const char* path, size_t expectedSize = 0);
@@ -161,7 +171,7 @@ private:
     static constexpr size_t MAX_PATH_LEN = 32;
 
     bool initialized;               ///< флаг успешной инициализации
-    FSInfo fsInfo;                  ///< информация о ФС
+    FsSpaceInfo fsInfo;             ///< информация о ФС
     uint32_t lastGCTime;            ///< время последней сборки мусора
 
     uint32_t readCount;             ///< количество успешных чтений

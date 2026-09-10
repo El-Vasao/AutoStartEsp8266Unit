@@ -1,5 +1,6 @@
 // src/core/Core.Modes.cpp
 #include "core/Core.h"
+#include "common/EspHal.h"
 #include "core/internal/CorePrivate.h"
 #include "core/internal/CoreBootHelpers.h"
 
@@ -9,7 +10,7 @@
 #include "fs/FSManager.h"
 #include "web/WebServer.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 const char* Core::getModeName() const {
     const CorePrivate& impl = *_impl;
@@ -90,7 +91,7 @@ void Core::handleBoot() {
                     logger.log("[Core] FATAL: Cannot mount LittleFS. Will reboot on next tick...\n");
                     impl.bootStage = CorePrivate::BootStage::Done;
                     impl.pendingHardRestart = true;
-                    ESP.wdtFeed();
+                    espHalFeedWdt();
                     break;
                 }
                 impl.errorManager.loadFromRtc();
@@ -105,7 +106,7 @@ void Core::handleBoot() {
                     impl.bootConfigLoaded = true;
                     impl.bootStage = CorePrivate::BootStage::Done;
                     impl.pendingHardRestart = true;
-                    ESP.wdtFeed();
+                    espHalFeedWdt();
                     break;
                 }
                 if (lo == ConfigLoadOutcome::Failed) {
@@ -116,7 +117,7 @@ void Core::handleBoot() {
                     break;
                 }
                 impl.bootConfigLoaded = true;
-                ESP.wdtFeed();
+                espHalFeedWdt();
                 impl.bootStage = CorePrivate::BootStage::EnsureProgramIndex;
                 break;
             }
@@ -128,7 +129,7 @@ void Core::handleBoot() {
                         (void)fileSystem.deleteFile("/setup.flag");
                     }
                 }
-                ESP.wdtFeed();
+                espHalFeedWdt();
                 impl.bootStage = CorePrivate::BootStage::InitHardware;
                 break;
             }
@@ -242,7 +243,7 @@ void Core::handleNormal() {
         } else {
             if (impl.prevSoftApSta == 0 && sta >= 1) {
                 logger.log("[Core] SoftAP STA joined — defer cellular for UI init (heap=%u)\n",
-                           (unsigned)ESP.getFreeHeap());
+                           (unsigned)espHalFreeHeap());
                 webServer.noteHeavyUiTraffic();
             }
             impl.prevSoftApSta = sta;
@@ -265,7 +266,7 @@ void Core::handleNormal() {
                 } else if ((nowMs - impl.cellularUiDeferLastLogMs) >= NetTiming::CELLULAR_UI_BOOTSTRAP_DEFER_LOG_MS) {
                     impl.cellularUiDeferLastLogMs = nowMs;
                     logger.log("[Core] cellular still deferred (ui not ready sta=%u heap=%u)\n",
-                               (unsigned)sta, (unsigned)ESP.getFreeHeap());
+                               (unsigned)sta, (unsigned)espHalFreeHeap());
                 }
                 suspendCellularLink();
             }

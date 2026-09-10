@@ -78,8 +78,6 @@ static inline void addNoCacheHeaders(AsyncWebServerResponse* resp) {
     resp->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     resp->addHeader("Pragma", "no-cache");
     resp->addHeader("Expires", "0");
-    // SoftAP ESP8266: force one request per TCP so the browser cannot pile keep-alives.
-    resp->addHeader("Connection", "close");
 }
 
 static inline void addSessionRevalidateHeaders(AsyncWebServerResponse* resp, const char* etag) {
@@ -88,7 +86,6 @@ static inline void addSessionRevalidateHeaders(AsyncWebServerResponse* resp, con
     if (etag && etag[0]) {
         resp->addHeader("ETag", etag);
     }
-    resp->addHeader("Connection", "close");
 }
 
 static inline bool urlEndsWith(const char* url, const char* suffix) {
@@ -144,7 +141,6 @@ static inline bool sendJsonFromFs(AsyncWebServerRequest* request, const char* pa
     resp->addHeader("Cache-Control", cacheControl ? cacheControl : "no-cache");
     resp->addHeader("Pragma", "no-cache");
     resp->addHeader("Expires", "0");
-    resp->addHeader("Connection", "close");
     request->send(resp);
     return true;
 }
@@ -198,10 +194,9 @@ static inline bool rejectIfFlashBusy(AsyncWebServerRequest* request) {
 static inline void sendJsonSuccess(AsyncWebServerRequest* request) {
     AsyncWebServerResponse* resp = request->beginResponse(200, kContentTypeJson, "{\"success\":true}");
     if (!resp) {
-        request->send(503, kContentTypeJson, "{\"success\":false,\"error\":\"LOW_MEMORY\"}");
+        request->send(503, kContentTypeJson, "{\"success\":false,\"error\":\"RESPONSE_ALLOC_FAILED\"}");
         return;
     }
-    resp->addHeader("Connection", "close");
     request->send(resp);
 }
 

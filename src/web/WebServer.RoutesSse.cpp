@@ -1,10 +1,11 @@
 #include "web/WebServer.h"
+#include "common/EspHal.h"
 #include "web/internal/WebServerInternal.h"
 #include "web/internal/WebServerRuntime.h"
 #include "common/Logger.h"
 #include "core/Core.h"
 #include "gsm/GSMController.h"
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 using namespace web_internal;
 
@@ -37,9 +38,9 @@ void WebServer::setupSseEndpointRoutes_() {
                              (unsigned)webServer.sseClientCount,
                              (unsigned)webServer.activeUiSessionCount(),
                              (unsigned)WiFi.softAPgetStationNum(),
-                             (unsigned)ESP.getFreeHeap(),
-                             (unsigned)ESP.getMaxFreeBlockSize(),
-                             (unsigned)ESP.getHeapFragmentation(),
+                             (unsigned)espHalFreeHeap(),
+                             (unsigned)espHalMaxBlock(),
+                             (unsigned)0 /* heap frag N/A on ESP32 */,
                              core.getGSM().getStateString());
     });
     server.addHandler(&events);

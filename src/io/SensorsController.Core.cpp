@@ -36,6 +36,10 @@ void SensorsController::begin() {
     logger.log("[SensorsController] begin\n");
     pinMode(Pin::ONEWIRE, INPUT);
 
+    // Battery divider outputs ~0–1 V into ADC; 0 dB atten ≈ 0–1.1 V full-scale on ESP32-C3.
+    analogSetAttenuation(ADC_0db);
+    analogReadResolution(12);
+
     _sensors.begin();
     _sensorCount = discoverSensors();
 

@@ -6,6 +6,7 @@
 #include "fs/FSManager.h"
 #include "web/WebServer.h"
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "common/Logger.h"
 
 FlashCommitCoordinator flashCommit;
@@ -31,7 +32,7 @@ void FlashCommitCoordinator::recordFlashCommitSnapshot(FlashCommitOp op, bool ok
 
 void FlashCommitCoordinator::tick(Core& core) {
     core.feedWatchdog();
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     if (core.getProgramExecutor().isRunning()) {
         if (isPending()) {
@@ -47,13 +48,13 @@ void FlashCommitCoordinator::tick(Core& core) {
 
     if (deferredPostedConfigApply_) {
         core.feedWatchdog();
-        ESP.wdtFeed();
+        espHalFeedWdt();
         logger.log("[FlashCommit] Config: deferred apply start %s (heap=%u)\n",
-                   HttpPostJson::TMP_CONFIG, ESP.getFreeHeap());
+                   HttpPostJson::TMP_CONFIG, espHalFreeHeap());
         const uint16_t beforeCrc = config.getCRC();
         const bool cfgOk = config.applyPostedConfigJsonFile(HttpPostJson::TMP_CONFIG);
         core.feedWatchdog();
-        ESP.wdtFeed();
+        espHalFeedWdt();
 
         if (!cfgOk) {
             recordFlashCommitSnapshot(FlashCommitOp::SAVE_CONFIG, false, false, config.getCRC());
@@ -68,7 +69,7 @@ void FlashCommitCoordinator::tick(Core& core) {
                        (int)changed,
                        (unsigned)beforeCrc,
                        (unsigned)afterCrc,
-                       ESP.getFreeHeap());
+                       espHalFreeHeap());
             webServer.broadcastStatusForce();
         }
         deferredPostedConfigApply_ = false;
@@ -76,11 +77,11 @@ void FlashCommitCoordinator::tick(Core& core) {
 
     if (deferredPostedProgramApply_) {
         core.feedWatchdog();
-        ESP.wdtFeed();
+        espHalFeedWdt();
 
         if (!deferredPostedProgramIndexPhase_) {
             logger.log("[FlashCommit] program: deferred apply start %s (heap=%u)\n",
-                       HttpPostJson::TMP_PROGRAM, ESP.getFreeHeap());
+                       HttpPostJson::TMP_PROGRAM, espHalFreeHeap());
             uint8_t postedId = 0;
             const bool parsedOk = config.commitPostedProgramFile(HttpPostJson::TMP_PROGRAM, &postedId);
             if (!parsedOk) {
@@ -94,14 +95,14 @@ void FlashCommitCoordinator::tick(Core& core) {
                 deferredPostedProgramIndexPhase_ = true;
                 webServer.broadcastStatusForce();
                 core.feedWatchdog();
-                ESP.wdtFeed();
+                espHalFeedWdt();
                 return; // next tick will rebuild index
             }
         } else {
-            logger.log("[FlashCommit] program: deferred rebuildProgramIndex (heap=%u)\n", ESP.getFreeHeap());
+            logger.log("[FlashCommit] program: deferred rebuildProgramIndex (heap=%u)\n", espHalFreeHeap());
             const bool ok = config.rebuildProgramIndex();
             recordFlashCommitSnapshot(FlashCommitOp::SAVE_PROGRAM, ok, ok, config.getCRC());
-            logger.log("[FlashCommit] program: flash save %s (heap=%u)\n", ok ? "OK" : "FAILED", ESP.getFreeHeap());
+            logger.log("[FlashCommit] program: flash save %s (heap=%u)\n", ok ? "OK" : "FAILED", espHalFreeHeap());
             webServer.broadcastStatusForce();
             deferredPostedProgramApply_ = false;
             deferredPostedProgramIndexPhase_ = false;
@@ -113,9 +114,9 @@ void FlashCommitCoordinator::tick(Core& core) {
     const PendingFsOp op = pendingFsOp_;
     pendingFsOp_ = PendingFsOp::NONE;
 
-    logger.log("[FlashCommit] deferred FS op: %u start (heap=%u)\n", (unsigned)op, ESP.getFreeHeap());
+    logger.log("[FlashCommit] deferred FS op: %u start (heap=%u)\n", (unsigned)op, espHalFreeHeap());
     core.feedWatchdog();
-    ESP.wdtFeed();
+    espHalFeedWdt();
     bool ok = false;
     FlashCommitOp flashOp = FlashCommitOp::NONE;
     if (op == PendingFsOp::DELETE_PROGRAM) {
@@ -134,6 +135,6 @@ void FlashCommitCoordinator::tick(Core& core) {
     }
     recordFlashCommitSnapshot(flashOp, ok, ok, config.getCRC());
     logger.log("[FlashCommit] deferred FS op: %u done ok=%d crc=%u heap=%u\n",
-               (unsigned)op, (int)ok, (unsigned)lastFlashCrc_, ESP.getFreeHeap());
+               (unsigned)op, (int)ok, (unsigned)lastFlashCrc_, espHalFreeHeap());
 }
 

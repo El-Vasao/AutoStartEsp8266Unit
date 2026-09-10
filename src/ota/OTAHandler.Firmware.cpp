@@ -4,9 +4,10 @@
 #include "core/Core.h"
 #include "common/Logger.h"
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "fs/FSManager.h"
 
-#include <Updater.h>
+#include <Update.h>
 
 bool OTAHandler::processUpdateFile() {
     File f = fileSystem.openRead("/update.bin");
@@ -30,7 +31,7 @@ bool OTAHandler::processUpdateFile() {
 
     yield();
     logger.log("[OTAHandler] heap before Update.begin: free=%u maxBlk=%u frag=%u%%\n",
-               (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize(), (unsigned)ESP.getHeapFragmentation());
+               (unsigned)espHalFreeHeap(), (unsigned)espHalMaxBlock(), (unsigned)0 /* heap frag N/A on ESP32 */);
 
     if (!Update.begin(fwSize)) {
         logger.log("[OTAHandler] Update.begin failed\n");

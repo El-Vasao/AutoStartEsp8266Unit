@@ -8,7 +8,7 @@ void WebServer::setupRootRoutes_() {
     server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
         webServer.noteHeavyUiTraffic();
         auto sendFallback = [&]() {
-            AsyncWebServerResponse* response = request->beginResponse_P(
+            AsyncWebServerResponse* response = request->beginResponse(
                 200,
                 "text/html; charset=utf-8",
                 reinterpret_cast<const uint8_t*>(FALLBACK_INDEX_HTML),

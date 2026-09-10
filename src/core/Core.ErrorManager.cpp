@@ -6,7 +6,7 @@
 
 /**
  * @file Core.ErrorManager.cpp
- * @brief Хранение/публикация последней ошибки + RTC persist (ESP8266 system_rtc_mem_*).
+ * @brief Хранение/публикация последней ошибки + RTC persist (RTC_DATA_ATTR на ESP32).
  *
  * Инварианты:
  * - Быстро и детерминированно: только простые записи/чтения RTC и логирование.
@@ -15,6 +15,10 @@
  * Запрещено:
  * - Делать сложную обработку “дерева ошибок” тут (это задача Core/подсистем).
  */
+
+namespace {
+RTC_DATA_ATTR RtcErrorRecord s_rtcErrorRecord;
+}
 
 ErrorManager::ErrorManager() : _lastError(ErrorCode::NONE), _errorTime(0) {
 }
@@ -34,8 +38,7 @@ void ErrorManager::clear() {
 }
 
 void ErrorManager::loadFromRtc() {
-    RtcErrorRecord record;
-    system_rtc_mem_read(RTC_ADDR, &record, sizeof(record));
+    RtcErrorRecord record = s_rtcErrorRecord;
 
     // RTC может содержать мусор после прошивки/первого старта — проверяем magic+CRC.
     if (record.magic != RTC_MAGIC) return;
@@ -56,12 +59,9 @@ void ErrorManager::saveToRtc() {
     record.uptime = millis() / Time::MS_PER_SEC;
     record.crc = calculateCRC16((const uint8_t*)&record, sizeof(record) - sizeof(record.crc));
 
-    system_rtc_mem_write(RTC_ADDR, &record, sizeof(record));
+    s_rtcErrorRecord = record;
 }
 
 void ErrorManager::clearRtc() {
-    RtcErrorRecord record;
-    memset(&record, 0, sizeof(record));
-    system_rtc_mem_write(RTC_ADDR, &record, sizeof(record));
+    memset(const_cast<RtcErrorRecord*>(&s_rtcErrorRecord), 0, sizeof(s_rtcErrorRecord));
 }
-

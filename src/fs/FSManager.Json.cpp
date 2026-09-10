@@ -1,5 +1,6 @@
 #include "fs/FSManager.h"
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "common/Logger.h"
 
 #include <errno.h>
@@ -15,7 +16,7 @@ public:
         const size_t w = file_.write(c);
         if (w != 0) {
             totalBytes_ += static_cast<uint32_t>(w);
-            if ((totalBytes_ & 0xFFu) == 0U) ESP.wdtFeed();
+            if ((totalBytes_ & 0xFFu) == 0U) espHalFeedWdt();
         }
         return w;
     }
@@ -29,7 +30,7 @@ public:
             if (w == 0) break;
             done += w;
             totalBytes_ += w;
-            if ((totalBytes_ & 0xFFu) == 0U) ESP.wdtFeed();
+            if ((totalBytes_ & 0xFFu) == 0U) espHalFeedWdt();
         }
         return done;
     }
@@ -60,7 +61,7 @@ static bool commitTmpToPath_atomic_(const char* path, char* tmpPath, bool hadBac
         }
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
     if (!LittleFS.rename(tmpPath, path)) {
         logger.log("[FSManager] atomic stream: rename failed (errno=%d)\n", errno);
         LittleFS.remove(tmpPath);
@@ -74,7 +75,7 @@ static bool commitTmpToPath_atomic_(const char* path, char* tmpPath, bool hadBac
         LittleFS.remove(bakPath);
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
     return true;
 }
 
@@ -109,7 +110,7 @@ bool FSManager::writeJsonAtomicStream(const char* path, JsonStreamEncodeFn encod
 
     JsonFilePrint jfp(f);
     const size_t written = encoder(jfp, ctx);
-    ESP.wdtFeed();
+    espHalFeedWdt();
     f.close();
 
     if (written == 0 || written >= maxBytes) {

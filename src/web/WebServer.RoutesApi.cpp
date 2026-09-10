@@ -14,6 +14,7 @@
  * - Подключать внутренние заголовки web-подсистемы из других подсистем.
  */
 #include "web/WebServer.h"
+#include "common/EspHal.h"
 #include "web/internal/WebServerInternal.h"
 #include "web/internal/WebServerRuntime.h"
 #include "core/Core.h"
@@ -135,23 +136,14 @@ void WebServer::setupApiRoutes_() {
         }
         gBootstrapLiteInFlight = true;
         const uint32_t startedAt = millis();
-        const uint32_t freeHeap = ESP.getFreeHeap();
-        const uint32_t maxBlk = ESP.getMaxFreeBlockSize();
-        if (freeHeap < MemorySlo::MIN_HEAP_FOR_BOOTSTRAP_LITE || maxBlk < MemorySlo::MIN_MAX_BLOCK_FOR_WEB_SEND) {
-            logger.log("[WebServer] /bootstrap rejected: low heap (free=%u max=%u)\n",
-                       (unsigned)freeHeap, (unsigned)maxBlk);
-            request->send(503, kContentTypeJson, "{\"success\":false,\"error\":\"LOW_MEMORY\"}");
-            gBootstrapLiteInFlight = false;
-            return;
-        }
         if (!sendJsonStreaming(request, emitBootstrapLiteJson, fillBootstrapLiteJson)) {
             gBootstrapLiteInFlight = false;
             return;
         }
         logger.log("[WebServer] /bootstrap done in %lu ms (heap free=%u max=%u)\n",
                    (unsigned long)(millis() - startedAt),
-                   (unsigned)ESP.getFreeHeap(),
-                   (unsigned)ESP.getMaxFreeBlockSize());
+                   (unsigned)espHalFreeHeap(),
+                   (unsigned)espHalMaxBlock());
         gBootstrapLiteInFlight = false;
     });
 
@@ -172,15 +164,6 @@ void WebServer::setupApiRoutes_() {
         }
         gBootstrapLiveInFlight = true;
         const uint32_t startedAt = now;
-        const uint32_t freeHeap = ESP.getFreeHeap();
-        const uint32_t maxBlk = ESP.getMaxFreeBlockSize();
-        if (freeHeap < MemorySlo::MIN_HEAP_FOR_BOOTSTRAP_LIVE || maxBlk < MemorySlo::MIN_MAX_BLOCK_FOR_WEB_SEND) {
-            logger.log("[WebServer] /bootstrap/live rejected: low heap (free=%u max=%u)\n",
-                       (unsigned)freeHeap, (unsigned)maxBlk);
-            request->send(503, kContentTypeJson, "{\"success\":false,\"error\":\"LOW_MEMORY\"}");
-            gBootstrapLiveInFlight = false;
-            return;
-        }
         if (!sendJsonStreaming(request, WebServerRuntime::emitLiveSnapshotJson, fillBootstrapLiveJson)) {
             gBootstrapLiveInFlight = false;
             return;
@@ -188,8 +171,8 @@ void WebServer::setupApiRoutes_() {
         gBootstrapLiveLastMs = millis();
         logger.log("[WebServer] /bootstrap/live done in %lu ms (heap free=%u max=%u)\n",
                    (unsigned long)(millis() - startedAt),
-                   (unsigned)ESP.getFreeHeap(),
-                   (unsigned)ESP.getMaxFreeBlockSize());
+                   (unsigned)espHalFreeHeap(),
+                   (unsigned)espHalMaxBlock());
         gBootstrapLiveInFlight = false;
     });
 

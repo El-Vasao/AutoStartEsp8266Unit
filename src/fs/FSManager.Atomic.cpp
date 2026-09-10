@@ -2,9 +2,10 @@
 #include "common/PoolManager.h"
 #include "core/Core.h"
 #include "common/Constants.h"
+#include "common/EspHal.h"
 #include "common/Logger.h"
 
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 
 bool FSManager::readFile(const char* path, char* buffer, size_t& len, size_t maxLen) {
 #ifdef SERIAL_DEBUG
@@ -76,18 +77,19 @@ bool FSManager::atomicWrite(const char* path, const char* data, size_t len) {
         return false;
     }
 
-    LittleFS.info(fsInfo);
+    fsInfo.totalBytes = LittleFS.totalBytes();
+    fsInfo.usedBytes = LittleFS.usedBytes();
     if (fsInfo.usedBytes + len + FSystem::GC_SPACE_MARGIN > fsInfo.totalBytes) {
         logger.log("[FSManager] Low space before atomicWrite, GC…\n");
         gc();
-        ESP.wdtFeed();
+        espHalFeedWdt();
     }
 
     strlcpy(pathBuffer, path, sizeof(pathBuffer));
     strlcat(pathBuffer, ".tmp", sizeof(pathBuffer));
 
     LittleFS.remove(pathBuffer);
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     File f = LittleFS.open(pathBuffer, "w");
     if (!f) {
@@ -98,7 +100,7 @@ bool FSManager::atomicWrite(const char* path, const char* data, size_t len) {
 
     size_t written = f.write((const uint8_t*)data, len);
     f.close();
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     if (written != len) {
         logger.log("[FSManager] atomicWrite short write %s (%u/%u)\n", pathBuffer, (unsigned)written, (unsigned)len);
@@ -108,7 +110,7 @@ bool FSManager::atomicWrite(const char* path, const char* data, size_t len) {
     }
 
     LittleFS.remove(path);
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     if (!LittleFS.rename(pathBuffer, path)) {
         logger.log("[FSManager] atomicWrite rename failed %s -> %s\n", pathBuffer, path);
@@ -117,7 +119,7 @@ bool FSManager::atomicWrite(const char* path, const char* data, size_t len) {
         return false;
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
     writeCount++;
     return true;
 }
@@ -192,7 +194,7 @@ bool FSManager::copyFileAtomic_(const char* srcPath, const char* destPath) {
             return false;
         }
         writtenTotal += n;
-        ESP.wdtFeed();
+        espHalFeedWdt();
         core.cooperate();
     }
     src.close();
@@ -333,7 +335,7 @@ File FSManager::openWriteStream(const char* path, size_t expectedSize) {
     if (freeSpace < expectedSize + FSystem::STREAM_SPACE_MARGIN) {
         logger.log("[FSManager] Low free space, running GC...\n");
         gc();
-        ESP.wdtFeed();
+        espHalFeedWdt();
         freeSpace = getFreeSpace();
         if (freeSpace < expectedSize + FSystem::STREAM_SPACE_MARGIN) {
             logger.log("[FSManager] Still low space, aborting\n");
@@ -350,7 +352,7 @@ File FSManager::openWriteStream(const char* path, size_t expectedSize) {
         LittleFS.remove(pathBuffer);
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     File f = LittleFS.open(pathBuffer, "w");
     if (!f) {
@@ -422,7 +424,7 @@ bool FSManager::closeWriteStream(File& f, const char* originalPath, bool commit)
     snprintf(tempPath, sizeof(tempPath), "%s.tmp", originalPath ? originalPath : "");
     tempPath[sizeof(tempPath) - 1] = '\0';
     f.close();
-    ESP.wdtFeed();
+    espHalFeedWdt();
 
     if (!commit) {
         bool removed = LittleFS.remove(tempPath);
@@ -445,7 +447,7 @@ bool FSManager::closeWriteStream(File& f, const char* originalPath, bool commit)
             errorCount++;
             return false;
         }
-        ESP.wdtFeed();
+        espHalFeedWdt();
     }
 
     if (!targetPath || !LittleFS.rename(tempPath, targetPath)) {
@@ -455,7 +457,7 @@ bool FSManager::closeWriteStream(File& f, const char* originalPath, bool commit)
         return false;
     }
 
-    ESP.wdtFeed();
+    espHalFeedWdt();
 #ifdef SERIAL_DEBUG
     logger.log("[FSManager] closeWriteStream: rename OK\n");
 #endif
